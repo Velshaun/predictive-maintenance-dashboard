@@ -1,10 +1,12 @@
 import os
+import time
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.api import machines, logs, predictions, ai_insights
 
-Base.metadata.create_all(bind=engine)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title='Predictive Maintenance API', version='1.0.0')
 
@@ -22,6 +24,21 @@ app.include_router(machines.router, prefix='/api/machines', tags=['machines'])
 app.include_router(logs.router, prefix='/api/logs', tags=['logs'])
 app.include_router(predictions.router, prefix='/api/predictions', tags=['predictions'])
 app.include_router(ai_insights.router, prefix='/api/ai', tags=['ai'])
+
+
+@app.on_event('startup')
+def startup():
+    for attempt in range(12):
+        try:
+            Base.metadata.create_all(bind=engine)
+            logger.info('Database tables created/verified successfully')
+            return
+        except Exception as e:
+            logger.warning(f'DB connection attempt {attempt + 1}/12 failed: {e}')
+            if attempt < 11:
+                time.sleep(5)
+            else:
+                raise RuntimeError(f'Could not connect to database after 12 attempts: {e}')
 
 
 @app.get('/health')
