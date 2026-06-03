@@ -50,7 +50,8 @@ def predict_days_until_service(temperature, vibration, pressure, runtime_hours):
     
     model = joblib.load(MODEL_PATH)
     X = np.array([[temperature, vibration, pressure, runtime_hours]])
-    prediction = model.predict(X)[0]
+    # Clamp to [3, 365] — ML output is never negative or unrealistically large
+    prediction = float(max(3.0, min(365.0, model.predict(X)[0])))
     
     # Get anomaly score
     anomaly_model = joblib.load(ANOMALY_PATH)
