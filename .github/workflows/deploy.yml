@@ -102,5 +102,5 @@ jobs:
           # Update to the exact image built in this run
           kubectl set image deployment/backend backend=$ECR_BACKEND:$GITHUB_SHA
           kubectl set image deployment/frontend frontend=$ECR_FRONTEND:$GITHUB_SHA
-          kubectl rollout status deployment/backend
-          kubectl rollout status deployment/frontend
+          kubectl rollout status deployment/backend --timeout=5m
+          kubectl rollout status deployment/frontend --timeout=5m
