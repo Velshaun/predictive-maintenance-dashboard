@@ -26,3 +26,9 @@ dist/
 
 # AWS
 .aws/
+
+# SQLite local dev / test databases
+*.db
+*.db-shm
+*.db-wal
+backend/tests/test_run.db
