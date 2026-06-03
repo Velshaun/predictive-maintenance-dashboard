@@ -7,7 +7,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "YOUR-TERRAFORM-STATE-BUCKET"
+    bucket = "maintenance-dashboard-tf-state"
     key    = "maintenance-dashboard/terraform.tfstate"
     region = "us-east-2"
   }
