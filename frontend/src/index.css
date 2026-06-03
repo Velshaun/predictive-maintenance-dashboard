@@ -8,10 +8,38 @@ body {
 }
 
 a { text-decoration: none; color: inherit; }
-
 button { font-family: inherit; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Pulse animation for critical status dots */
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+@keyframes pulse-yellow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.5); }
+  50%       { box-shadow: 0 0 0 5px rgba(234, 179, 8, 0); }
+}
+
+.pulse-red    { animation: pulse-red    1.5s ease-in-out infinite; }
+.pulse-yellow { animation: pulse-yellow 2s   ease-in-out infinite; }
+
+/* Machine card hover */
+.machine-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
+}
+.machine-card:hover {
+  box-shadow: 0 6px 20px rgba(0,0,0,0.09);
+  border-color: #93c5fd;
+  transform: translateY(-2px);
+}
