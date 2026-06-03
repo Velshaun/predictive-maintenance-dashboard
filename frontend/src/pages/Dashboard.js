@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMachines } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
+import { StatCardSkeleton, MachineCardSkeleton } from '../components/Skeleton';
 
 /* ── KPI Stat Card ─────────────────────────────────────── */
 const StatCard = ({ label, value, icon, accent, trend, trendLabel, bg }) => (
@@ -100,29 +101,33 @@ export default function Dashboard() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
-      {/* ── KPI Cards ── */}
+      {/* ── KPI Cards (skeleton while loading) ── */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 32 }}>
-        <StatCard
-          label="Total Assets" value={counts.total}
-          accent="#3b82f6" trend={12} trendLabel="vs. last month"
-          icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>}
-        />
-        <StatCard
-          label="Operational" value={counts.green}
-          accent="#22c55e" trend={5} trendLabel="running normally"
-          icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-        />
-        <StatCard
-          label="Service Soon" value={counts.yellow}
-          accent="#eab308" trend={counts.yellow > 0 ? -8 : 0} trendLabel="requires attention"
-          icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
-        />
-        <StatCard
-          label="Critical" value={counts.red}
-          accent="#ef4444" trend={counts.red > 0 ? -15 : 0} trendLabel="immediate action"
-          bg={counts.red > 0 ? '#fff8f8' : '#fff'}
-          icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>}
-        />
+        {loading ? [1,2,3,4].map(i => <StatCardSkeleton key={i} />) : (
+          <>
+            <StatCard
+              label="Total Assets" value={counts.total}
+              accent="#3b82f6" trend={12} trendLabel="vs. last month"
+              icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>}
+            />
+            <StatCard
+              label="Operational" value={counts.green}
+              accent="#22c55e" trend={5} trendLabel="running normally"
+              icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+            />
+            <StatCard
+              label="Service Soon" value={counts.yellow}
+              accent="#eab308" trend={counts.yellow > 0 ? -8 : 0} trendLabel="requires attention"
+              icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
+            />
+            <StatCard
+              label="Critical" value={counts.red}
+              accent="#ef4444" trend={counts.red > 0 ? -15 : 0} trendLabel="immediate action"
+              bg={counts.red > 0 ? '#fff8f8' : '#fff'}
+              icon={<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>}
+            />
+          </>
+        )}
       </div>
 
       {/* ── Section header + Search + Filter ── */}
@@ -205,22 +210,39 @@ export default function Dashboard() {
       {/* ── Machine grid ── */}
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
-          {[1,2,3,4,5,6].map(i => (
-            <div key={i} style={{ height: 140, borderRadius: 12, background: '#f1f5f9', animation: 'pulse 1.5s ease-in-out infinite' }} />
-          ))}
+          {[1,2,3,4,5,6].map(i => <MachineCardSkeleton key={i} />)}
         </div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px dashed #e2e8f0', borderRadius: 14, padding: '52px 32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>{search || filter !== 'all' ? '🔍' : '⚙️'}</div>
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '56px 32px', textAlign: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          {/* SVG illustration */}
+          {search || filter !== 'all' ? (
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style={{ margin: '0 auto 16px', display: 'block' }}>
+              <circle cx="28" cy="28" r="20" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="2"/>
+              <circle cx="28" cy="28" r="12" fill="#e2e8f0"/>
+              <line x1="43" y1="43" x2="56" y2="56" stroke="#cbd5e1" strokeWidth="3" strokeLinecap="round"/>
+              <line x1="22" y1="28" x2="34" y2="28" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
+              <line x1="28" y1="22" x2="28" y2="34" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style={{ margin: '0 auto 16px', display: 'block' }}>
+              <rect x="8" y="12" width="48" height="12" rx="4" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1.5"/>
+              <rect x="8" y="28" width="48" height="12" rx="4" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1.5"/>
+              <rect x="8" y="44" width="48" height="10" rx="4" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1.5"/>
+              <circle cx="16" cy="18" r="3" fill="#cbd5e1"/>
+              <circle cx="16" cy="34" r="3" fill="#cbd5e1"/>
+              <rect x="24" y="16" width="20" height="3" rx="1.5" fill="#e2e8f0"/>
+              <rect x="24" y="32" width="14" height="3" rx="1.5" fill="#e2e8f0"/>
+            </svg>
+          )}
           <div style={{ fontSize: 15, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
             {search || filter !== 'all' ? 'No machines match your filters' : 'No machines yet'}
           </div>
-          <div style={{ fontSize: 13, color: '#94a3b8' }}>
-            {search || filter !== 'all' ? 'Try adjusting your search or filter.' : 'Add your first machine via the API.'}
+          <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 16 }}>
+            {search || filter !== 'all' ? 'Try adjusting your search or filter.' : 'Add your first machine via the API to get started.'}
           </div>
           {(search || filter !== 'all') && (
             <button onClick={() => { setSearch(''); setFilter('all'); }} style={{
-              marginTop: 16, padding: '8px 16px', borderRadius: 8,
+              padding: '8px 18px', borderRadius: 8,
               border: '1px solid #e2e8f0', background: '#fff', fontSize: 13,
               fontWeight: 600, color: '#3b82f6', cursor: 'pointer',
             }}>

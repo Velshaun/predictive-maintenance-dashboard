@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { getMachine, getMachineLogs, predict, getAIInsight } from '../utils/api';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import StatusBadge from '../components/StatusBadge';
+import { MachineHeaderSkeleton, Sk } from '../components/Skeleton';
 
 /* ── Pill Tab ───────────────────────────────────────────── */
 const PillTab = ({ label, active, onClick, icon, count }) => (
@@ -84,7 +85,34 @@ export default function MachinePage() {
   };
 
   if (!machine) return (
-    <div style={{ padding: '40px 32px', color: '#64748b', fontSize: 14 }}>Loading machine…</div>
+    <div style={{ padding: '28px 32px', maxWidth: 960 }}>
+      {/* Breadcrumb skeleton */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+        <Sk w={70} h={12} r={6} />
+        <Sk w={12} h={12} r={3} />
+        <Sk w={120} h={12} r={6} />
+      </div>
+      {/* Header skeleton */}
+      <MachineHeaderSkeleton />
+      {/* Tab bar skeleton */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 22 }}>
+        {[80, 60, 72].map((w, i) => <Sk key={i} w={w} h={34} r={999} />)}
+      </div>
+      {/* Content skeleton */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '24px 28px' }}>
+        <Sk w="35%" h={14} r={6} style={{ marginBottom: 8 }} />
+        <Sk w="20%" h={11} r={6} style={{ marginBottom: 24 }} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          {[1,2,3,4].map(i => (
+            <div key={i} style={{ flex: 1, background: '#f8fafc', borderRadius: 12, padding: '16px 18px' }}>
+              <Sk w="60%" h={10} r={4} style={{ marginBottom: 12 }} />
+              <Sk w="50%" h={22} r={5} style={{ marginBottom: 6 }} />
+              <Sk w="70%" h={10} r={4} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 
   return (

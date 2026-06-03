@@ -10,4 +10,6 @@ export const createMachine = (data) => api.post('/api/machines/', data);
 export const getMachineLogs = (id) => api.get(`/api/machines/${id}/logs`);
 export const addLog = (data) => api.post('/api/machines/logs', data);
 export const predict = (data) => api.post('/api/predictions/predict', data);
+export const getMachineStatus = (id) => api.get(`/api/predictions/status/${id}`);
+export const trainModel = () => api.post('/api/predictions/train');
 export const getAIInsight = (data) => api.post('/api/ai/insight', data);
