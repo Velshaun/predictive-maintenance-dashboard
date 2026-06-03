@@ -85,6 +85,21 @@ jobs:
 
       - name: Deploy to EKS
         run: |
+          # Substitute account ID placeholder in manifests
+          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/backend-deployment.yml
+          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/frontend-deployment.yml
+
+          # Create/update app-secrets
+          kubectl create secret generic app-secrets \
+            --from-literal=database-url="${{ secrets.DATABASE_URL }}" \
+            --from-literal=anthropic-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Apply manifests (creates deployments if they don't exist)
+          kubectl apply -f infrastructure/kubernetes/backend-deployment.yml
+          kubectl apply -f infrastructure/kubernetes/frontend-deployment.yml
+
+          # Update to the exact image built in this run
           kubectl set image deployment/backend backend=$ECR_BACKEND:$GITHUB_SHA
           kubectl set image deployment/frontend frontend=$ECR_FRONTEND:$GITHUB_SHA
           kubectl rollout status deployment/backend
