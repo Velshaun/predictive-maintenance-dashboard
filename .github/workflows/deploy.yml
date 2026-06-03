@@ -89,9 +89,10 @@ jobs:
           sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/backend-deployment.yml
           sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/frontend-deployment.yml
 
-          # Create/update app-secrets
+          # Create/update app-secrets (strip trailing whitespace from DATABASE_URL)
+          DB_URL=$(echo -n "${{ secrets.DATABASE_URL }}" | tr -d '[:space:]')
           kubectl create secret generic app-secrets \
-            --from-literal=database-url="${{ secrets.DATABASE_URL }}" \
+            --from-literal=database-url="${DB_URL}" \
             --from-literal=anthropic-key="${{ secrets.ANTHROPIC_API_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
