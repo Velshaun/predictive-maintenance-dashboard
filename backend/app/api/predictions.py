@@ -127,14 +127,31 @@ def trigger_training(db: Session = Depends(get_db)):
     if len(readings) < 20:
         return {'error': 'Need at least 20 readings to train', 'current': len(readings)}
     
-    # Prepare training data
+    # Prepare training data.
+    # Labels are derived from sensor health — always a positive value in [3, 90].
+    # High sensor stress → fewer days until service is needed.
+    def _label(r) -> float:
+        t, v, p = r.temperature, r.vibration, r.pressure
+        if t > 90 or v > 8 or p > 120:
+            # Critical zone: 3–14 days
+            penalty = max(t - 90, 0) * 0.5 + max(v - 8, 0) * 2 + max(p - 120, 0) * 0.1
+            return float(max(3, 14 - int(penalty)))
+        elif t > 75 or v > 5 or p > 100:
+            # Warning zone: 15–30 days
+            penalty = max(t - 75, 0) * 0.8 + max(v - 5, 0) * 2 + max(p - 100, 0) * 0.1
+            return float(max(15, 30 - int(penalty)))
+        else:
+            # Healthy zone: 31–90 days
+            stress = (t - 60) * 0.4 + v * 1.5 + (p - 70) * 0.2
+            return float(min(90, max(31, int(90 - stress))))
+
     data = [
         {
             'temperature': r.temperature,
             'vibration': r.vibration,
             'pressure': r.pressure,
             'runtime_hours': r.runtime_hours,
-            'days_until_service': 60 - (r.runtime_hours / 24)  # Example label
+            'days_until_service': _label(r),
         }
         for r in readings
     ]
