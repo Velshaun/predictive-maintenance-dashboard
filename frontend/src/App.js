@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import MachinePage from './pages/MachinePage';
 import MachinesPage from './pages/MachinesPage';
 import PredictionsPage from './pages/PredictionsPage';
+import SettingsPage from './pages/SettingsPage';
 
 /* Wraps page content with fade-in transition on route change */
 function AnimatedRoutes() {
@@ -16,6 +17,7 @@ function AnimatedRoutes() {
         <Route path='/machines' element={<MachinesPage />} />
         <Route path='/predictions' element={<PredictionsPage />} />
         <Route path='/machine/:id' element={<MachinePage />} />
+        <Route path='/settings' element={<SettingsPage />} />
       </Routes>
     </div>
   );
