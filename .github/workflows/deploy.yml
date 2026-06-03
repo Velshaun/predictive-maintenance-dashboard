@@ -43,6 +43,11 @@ jobs:
           cd frontend
           npm install
 
+      - name: Run frontend tests
+        run: |
+          cd frontend
+          CI=true npm test -- --watchAll=false --forceExit
+
       - name: Build frontend
         run: |
           cd frontend
