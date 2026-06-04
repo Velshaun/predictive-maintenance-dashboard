@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   getMachines, createMachine,
-  softDeleteMachine, restoreMachine, permanentDeleteMachine,
+  softDeleteMachine, restoreMachine, permanentDeleteMachine, addLog,
 } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
@@ -62,6 +62,14 @@ function savePredictions(data) {
   try { localStorage.setItem(PRED_KEY, JSON.stringify(data)); } catch (_) {}
 }
 
+/** Live days-remaining countdown from a service_due_date ISO string. */
+function calcCountdown(serviceDueDate, now) {
+  if (!serviceDueDate) return { days: null, isOverdue: false };
+  const diffMs = new Date(serviceDueDate) - now;
+  if (diffMs < 0) return { days: 0, isOverdue: true };
+  return { days: Math.ceil(diffMs / 86400000), isOverdue: false };
+}
+
 /* ══════════════════════════════════════════════════════════ */
 export default function MachinesPage() {
   const [machines, setMachines]       = useState([]);
@@ -87,6 +95,21 @@ export default function MachinesPage() {
   // Restore / permanent delete state
   const [restoringId, setRestoringId]       = useState(null);
   const [permDeletingId, setPermDeletingId] = useState(null);
+
+  // Live countdown clock (ticks every minute)
+  const [now, setNow] = useState(Date.now());
+  // Mark-as-serviced confirmation modal
+  const [serviceModal, setServiceModal] = useState(null); // { id, name }
+  // Prediction results from localStorage
+  const [predictions, setPredictions] = useState(() => {
+    const d = loadPredictions();
+    return d?.predictions || {};
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     getMachines()
@@ -203,6 +226,38 @@ export default function MachinesPage() {
       setPermDeletingId(null);
     }
   }, [deletedList]);
+
+  /* ── Mark as Serviced ────────────────────────────────────── */
+  const confirmMarkServiced = useCallback(async () => {
+    if (!serviceModal) return;
+    const { id } = serviceModal;
+    setServiceModal(null);
+
+    const newDueDate = new Date(Date.now() + 90 * 86400000).toISOString();
+    const predData = loadPredictions();
+    if (!predData.predictions) predData.predictions = {};
+    predData.predictions[id] = {
+      ...(predData.predictions[id] || {}),
+      days_until_service: 90,
+      service_due_date:   newDueDate,
+      status:             'green',
+      error:              undefined,
+    };
+    savePredictions(predData);
+    setPredictions({ ...predData.predictions });
+
+    try {
+      await addLog({
+        machine_id:  id,
+        description: 'Serviced via MaintainIQ — status reset',
+        technician:  'System',
+        cost:        0,
+      });
+    } catch (e) {
+      console.warn('Service log failed:', e?.message);
+    }
+    getMachines().then(r => setMachines(r.data));
+  }, [serviceModal]);
 
   /* ── Sort / filter ───────────────────────────────────────── */
   const handleColSort = (col) => {
@@ -433,6 +488,7 @@ export default function MachinesPage() {
                 <th style={TH}>Type</th>
                 <th style={TH}>Location</th>
                 <ColHeader col="status" label="Status" />
+                <th style={TH}>Days Until Service</th>
                 <ColHeader col="last_serviced" label="Last Serviced" />
                 <th style={{ ...TH, textAlign: 'right' }}>Actions</th>
               </tr>
@@ -442,7 +498,7 @@ export default function MachinesPage() {
                 Array.from({ length: 6 }).map((_, i) => <SkRow key={i} />)
               ) : processed.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: '52px 32px', textAlign: 'center' }}>
+                  <td colSpan={8} style={{ padding: '52px 32px', textAlign: 'center' }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: '#475569', marginBottom: 4 }}>No machines match your filters</div>
                     <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>Try adjusting your search or status filter.</div>
                     <button onClick={() => { setSearch(''); setStatusFilter('all'); }} style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 13, fontWeight: 600, color: '#3b82f6', cursor: 'pointer' }}>Clear filters</button>
@@ -482,6 +538,35 @@ export default function MachinesPage() {
 
                     <td style={TD}><StatusBadge status={m.status} /></td>
 
+                    {/* Days Until Service — live countdown */}
+                    <td style={TD}>
+                      {(() => {
+                        const p = predictions[m.id];
+                        if (!p || p.error) return <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>;
+                        let days = null; let isOverdue = false;
+                        if (p.service_due_date) {
+                          const cd = calcCountdown(p.service_due_date, now);
+                          days = cd.days; isOverdue = cd.isOverdue;
+                        } else if (p.days_until_service != null) {
+                          days = Math.round(p.days_until_service);
+                        }
+                        if (days == null) return <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>;
+                        const color = isOverdue ? '#ef4444' : days <= 7 ? '#ef4444' : days <= 30 ? '#eab308' : '#22c55e';
+                        if (isOverdue) return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span style={{ fontSize: 16, fontWeight: 800, color: '#ef4444' }}>0</span>
+                            <span style={{ fontSize: 10, color: '#fff', background: '#ef4444', borderRadius: 5, padding: '1px 6px', fontWeight: 700 }}>Overdue</span>
+                          </div>
+                        );
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 16, fontWeight: 800, color, letterSpacing: '-0.5px' }}>{days}</span>
+                            <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>days</span>
+                          </div>
+                        );
+                      })()}
+                    </td>
+
                     <td style={{ ...TD, color: '#64748b' }}>
                       {m.last_serviced ? (
                         <div>
@@ -493,6 +578,25 @@ export default function MachinesPage() {
 
                     <td style={{ ...TD, textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {/* Mark as Serviced — only shown when a prediction exists */}
+                        {predictions[m.id] && !predictions[m.id]?.error && (
+                          <button
+                            onClick={() => setServiceModal({ id: m.id, name: m.name })}
+                            title="Mark as Serviced"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '5px 12px', borderRadius: 8,
+                              border: '1px solid #bbf7d0', background: '#f0fdf4',
+                              fontSize: 12, fontWeight: 600, color: '#16a34a',
+                              cursor: 'pointer', transition: 'all 0.12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#16a34a'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#16a34a'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.color = '#16a34a'; e.currentTarget.style.borderColor = '#bbf7d0'; }}
+                          >
+                            <svg width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                            Serviced
+                          </button>
+                        )}
                         <Link to={`/machine/${m.id}`}>
                           <button style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#0f172a', transition: 'all 0.12s' }}
                             onMouseEnter={e => { e.currentTarget.style.background = '#0f172a'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#0f172a'; }}
@@ -538,6 +642,47 @@ export default function MachinesPage() {
           </div>
         )}
       </div>
+
+      {/* ── Mark as Serviced confirmation modal ──────────────── */}
+      {serviceModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setServiceModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#fff', borderRadius: 16, padding: '28px 32px',
+            maxWidth: 420, width: '90%', boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="18" height="18" fill="none" stroke="#16a34a" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>Confirm Service</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>Resets countdown to 90 days</div>
+              </div>
+            </div>
+            <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#475569' }}>
+              Confirm service completed for <strong style={{ color: '#0f172a' }}>{serviceModal.name}</strong>?
+              <div style={{ marginTop: 6, fontSize: 12, color: '#94a3b8' }}>
+                Days until service will reset to 90 and a maintenance log entry will be created.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setServiceModal(null)} style={{
+                padding: '8px 18px', borderRadius: 8, border: '1px solid #e2e8f0',
+                background: '#fff', fontSize: 13, fontWeight: 600, color: '#64748b', cursor: 'pointer',
+              }}>Cancel</button>
+              <button onClick={confirmMarkServiced} style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg,#16a34a,#22c55e)', color: '#fff',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                boxShadow: '0 3px 8px rgba(34,197,94,0.28)',
+              }}>Mark as Serviced</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Recently Deleted section ──────────────────────────── */}
       {deletedList.length > 0 && (
