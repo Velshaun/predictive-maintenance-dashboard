@@ -525,8 +525,14 @@ export default function MachinesPage() {
                       </div>
                     </td>
 
-                    <td style={{ ...TD, color: '#475569' }}>
-                      <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '3px 8px', fontSize: 12, fontWeight: 500 }}>{m.machine_type}</span>
+                    <td style={TD}>
+                      <span style={{
+                        display: 'inline-block', background: '#f8fafc',
+                        border: '1px solid #e2e8f0', borderRadius: 6,
+                        padding: '3px 10px', fontSize: 12, fontWeight: 500,
+                        color: '#475569', whiteSpace: 'nowrap',
+                        maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{m.machine_type}</span>
                     </td>
 
                     <td style={{ ...TD, color: '#64748b' }}>
