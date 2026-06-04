@@ -8,23 +8,25 @@ import { getMachines, getMachineStatus, predict, trainModel } from '../utils/api
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
 
-/* ── Anomaly score normalizer ──────────────────────────────────────────────
-   IsolationForest decision_function: lower = more anomalous.
-   Typical range –0.5 → +0.5. Map to 0–100% (high % = bad).            */
+/* ── localStorage key ────────────────────────────────────────────────── */
+const STORAGE_KEY = 'pm_prediction_results';
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
 const anomalyPct = (raw) => {
   if (raw == null) return null;
   return Math.max(0, Math.min(100, Math.round((0.5 - raw) * 100)));
 };
 
-/* ── Bar / text colour by days_until_service ─────────────────────────── */
 const barColor = (days) => {
   if (days == null) return '#e2e8f0';
-  if (days <= 7)  return '#ef4444';
-  if (days <= 30) return '#eab308';
+  if (days <= 7)   return '#ef4444';
+  if (days <= 30)  return '#eab308';
   return '#22c55e';
 };
 
-/* ── Anomaly mini-bar pill ───────────────────────────────────────────── */
+const FALLBACK_READING = { temperature: 70.0, vibration: 3.0, pressure: 85.0, runtime_hours: 200.0 };
+
+/* ── Sub-components ──────────────────────────────────────────────────── */
 const AnomalyPill = ({ score }) => {
   const pct = anomalyPct(score);
   if (pct == null) return <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>;
@@ -43,7 +45,6 @@ const AnomalyPill = ({ score }) => {
   );
 };
 
-/* ── Custom tooltip ──────────────────────────────────────────────────── */
 const ChartTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
@@ -63,56 +64,61 @@ const ChartTooltip = ({ active, payload }) => {
   );
 };
 
-/* ── Shared table styles ─────────────────────────────────────────────── */
 const TD = { padding: '13px 16px', fontSize: 13, color: '#0f172a', borderBottom: '1px solid #f8fafc', verticalAlign: 'middle' };
 const TH = { padding: '10px 16px', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', whiteSpace: 'nowrap' };
 
-/* ── Fallback sensor values for machines with no readings ────────────── */
-const FALLBACK_READING = { temperature: 70.0, vibration: 3.0, pressure: 85.0, runtime_hours: 200.0 };
-
+/* ══════════════════════════════════════════════════════════════════════ */
 export default function PredictionsPage() {
   const [machines, setMachines]       = useState([]);
   const [loading, setLoading]         = useState(true);
   const [predictions, setPredictions] = useState({}); // machine_id → result
 
-  const [training, setTraining]       = useState(false);
-  const [trainResult, setTrainResult] = useState(null);
-
   const [running, setRunning]         = useState(false);
-  const [hasRun, setHasRun]           = useState(false); // permanently locked after first run
+  const [hasRun, setHasRun]           = useState(false); // button permanently locked
   const [progress, setProgress]       = useState(0);
+  const [runError, setRunError]       = useState(null);
 
+  /* ── On mount: load machines + restore persisted predictions ───────── */
   useEffect(() => {
     getMachines()
       .then(r => setMachines(r.data))
       .finally(() => setLoading(false));
-  }, []);
 
-  /* ── Train model ───────────────────────────────────────────────────── */
-  const handleTrain = useCallback(async () => {
-    setTraining(true);
-    setTrainResult(null);
     try {
-      const res = await trainModel();
-      setTrainResult(res.data);
-    } catch (e) {
-      setTrainResult({ error: e?.response?.data?.detail || 'Training failed.' });
-    } finally {
-      setTraining(false);
-    }
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const { predictions: savedPreds } = JSON.parse(saved);
+        if (savedPreds && Object.keys(savedPreds).length > 0) {
+          setPredictions(savedPreds);
+          setHasRun(true); // results already exist — keep button disabled
+        }
+      }
+    } catch (_) { /* ignore corrupt storage */ }
   }, []);
 
-  /* ── Run all predictions — sequential, never parallel ─────────────── */
+  /* ── Run Predictions (trains silently first, then predicts all) ─────── */
   const handleRunAll = useCallback(async () => {
-    if (hasRun || running || loading) return; // hard guard
+    if (hasRun || running || loading) return;
+
     setRunning(true);
+    setHasRun(true);   // disable button immediately — re-enabled only on full failure
     setProgress(0);
+    setRunError(null);
+
+    // ── Step 1: silent train (user never sees this) ──────────────────
+    try {
+      await trainModel();
+    } catch (e) {
+      console.warn('[predictions] training failed, continuing with existing model:', e?.message);
+    }
+
+    // ── Step 2: sequential predict for every machine ─────────────────
+    const results = {};
+    let successCount = 0;
 
     for (let i = 0; i < machines.length; i++) {
       const m = machines[i];
-      let result;
       try {
-        // Fetch latest sensor reading; fall back to defaults if none exists
         let reading = FALLBACK_READING;
         try {
           const statusRes = await getMachineStatus(m.id);
@@ -125,32 +131,49 @@ export default function PredictionsPage() {
               runtime_hours: lr.runtime_hours,
             };
           }
-        } catch (_) { /* keep fallback */ }
+        } catch (statusErr) {
+          console.warn(`[predictions] could not fetch reading for machine ${m.id}, using fallback`);
+        }
 
-        // Await prediction before moving to next machine
+        // Await each machine individually — never move on until this resolves
         const predRes = await predict({ machine_id: m.id, ...reading });
-        result = predRes.data;
-      } catch (e) {
-        result = { error: e?.response?.data?.detail || 'Prediction failed' };
+        results[m.id] = predRes.data;
+        successCount++;
+      } catch (predErr) {
+        // Log and continue — do NOT stop the loop
+        console.error(`[predictions] machine ${m.id} failed:`, predErr?.message);
+        results[m.id] = { error: predErr?.response?.data?.detail || 'Prediction failed' };
       }
 
-      // Update predictions map incrementally (one machine at a time)
-      setPredictions(prev => ({ ...prev, [m.id]: result }));
+      // Incrementally update UI so chart/table fill in one row at a time
+      setPredictions(prev => ({ ...prev, [m.id]: results[m.id] }));
       setProgress(i + 1);
     }
 
     setRunning(false);
-    setHasRun(true); // permanently disable the button
+
+    if (successCount === 0) {
+      // Full run failed — re-enable so the user can try again
+      setHasRun(false);
+      setRunError('All predictions failed. Check that the backend is reachable and try again.');
+      return;
+    }
+
+    // ── Step 3: persist results to localStorage ───────────────────────
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        predictions: results,
+        timestamp:   Date.now(),
+      }));
+    } catch (_) { /* storage full or unavailable — not critical */ }
 
     // Refresh machine list so current statuses reflect ML output
     getMachines().then(r => setMachines(r.data));
   }, [machines, hasRun, running, loading]);
 
-  /* ─────────────────────────────────────────────────────────────────────
-     Single shared data source — used by BOTH chart and table.
-     Always contains one row per machine; prediction fields are null
-     until handleRunAll fills them in.
-     ───────────────────────────────────────────────────────────────────── */
+  /* ── Shared data source for chart AND table ─────────────────────────
+     One row per machine, always 10 rows.  Prediction fields are null
+     until results arrive (or are restored from localStorage).        */
   const predRows = machines.map(m => {
     const p = predictions[m.id];
     return {
@@ -160,92 +183,70 @@ export default function PredictionsPage() {
       type:            m.machine_type,
       currentStatus:   m.status,
       days:            p?.days_until_service ?? null,
-      predictedStatus: p?.status    ?? null,
-      anomalyScore:    p?.anomaly_score ?? null,
-      error:           p?.error     ?? null,
+      predictedStatus: p?.status             ?? null,
+      anomalyScore:    p?.anomaly_score       ?? null,
+      error:           p?.error               ?? null,
     };
   });
 
-  const hasPredictions   = Object.keys(predictions).length > 0;
-  const canTrain         = !loading && machines.length > 0;
-  const runBtnDisabled   = running || loading || hasRun;
+  const hasPredictions  = Object.keys(predictions).length > 0;
+  const btnDisabled     = running || loading || hasRun;
 
-  /* ─────────────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════ */
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
       {/* ── Action bar ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 28, flexWrap: 'wrap' }}>
 
-        {/* Train button */}
-        <div>
-          <button onClick={handleTrain} disabled={training || !canTrain} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '10px 20px', borderRadius: 10, border: 'none',
-            cursor: training || !canTrain ? 'not-allowed' : 'pointer',
-            background: training ? '#f1f5f9' : 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
-            color: training ? '#94a3b8' : '#fff',
-            fontWeight: 600, fontSize: 14,
-            boxShadow: training ? 'none' : '0 4px 12px rgba(139,92,246,0.35)',
-            transition: 'all 0.15s',
-          }}>
-            {training ? (
-              <><svg className="spin" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>Training…</>
-            ) : (
-              <><svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>Train Model</>
-            )}
-          </button>
-
-          {trainResult && (
-            <div style={{
-              marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-              background: trainResult.error ? '#fef2f2' : '#f0fdf4',
-              color: trainResult.error ? '#b91c1c' : '#15803d',
-              border: `1px solid ${trainResult.error ? '#fecaca' : '#bbf7d0'}`,
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              {trainResult.error ? (
-                <><svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>{trainResult.error}</>
-              ) : (
-                <><svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Model trained on {trainResult.samples} readings — ready to predict.</>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Run All Predictions button — disabled permanently after first run */}
+        {/* Single "Run Predictions" button */}
         <div>
           <button
             onClick={handleRunAll}
-            disabled={runBtnDisabled}
+            disabled={btnDisabled}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '10px 20px', borderRadius: 10, border: 'none',
-              cursor: runBtnDisabled ? 'not-allowed' : 'pointer',
-              background: hasRun
+              padding: '10px 22px', borderRadius: 10, border: 'none',
+              cursor: btnDisabled ? 'not-allowed' : 'pointer',
+              background: hasRun && !running
                 ? '#f1f5f9'
                 : running
                   ? '#f1f5f9'
                   : 'linear-gradient(135deg,#2563eb,#3b82f6)',
-              color: runBtnDisabled ? '#94a3b8' : '#fff',
+              color: btnDisabled ? '#94a3b8' : '#fff',
               fontWeight: 600, fontSize: 14,
-              boxShadow: runBtnDisabled ? 'none' : '0 4px 12px rgba(59,130,246,0.35)',
+              boxShadow: btnDisabled ? 'none' : '0 4px 12px rgba(59,130,246,0.35)',
               transition: 'all 0.15s',
-              opacity: hasRun ? 0.6 : 1,
+              opacity: hasRun && !running ? 0.65 : 1,
             }}
           >
             {running ? (
-              <><svg className="spin" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>Predicting {progress}/{machines.length}…</>
+              <>
+                <svg className="spin" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/>
+                </svg>
+                Predicting {progress}/{machines.length}…
+              </>
             ) : hasRun ? (
-              <><svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Predictions Complete</>
+              <>
+                <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                Predictions Complete
+              </>
             ) : (
-              <><svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>Run All Predictions</>
+              <>
+                <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Run Predictions
+              </>
             )}
           </button>
 
-          {/* Progress bar while running */}
+          {/* Progress bar */}
           {running && (
-            <div style={{ marginTop: 8, height: 4, width: 200, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ marginTop: 8, height: 4, width: 220, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 2,
                 background: 'linear-gradient(90deg,#2563eb,#3b82f6)',
@@ -254,9 +255,23 @@ export default function PredictionsPage() {
               }} />
             </div>
           )}
+
+          {/* Error banner — only shown on full failure */}
+          {runError && (
+            <div style={{
+              marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca',
+              display: 'flex', alignItems: 'center', gap: 6, maxWidth: 380,
+            }}>
+              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              {runError}
+            </div>
+          )}
         </div>
 
-        {/* Summary chip — shown once all predictions are done */}
+        {/* Summary chip */}
         {hasPredictions && !running && (
           <div className="fade-slide-up" style={{
             alignSelf: 'center', padding: '8px 16px', borderRadius: 999,
@@ -264,20 +279,21 @@ export default function PredictionsPage() {
             fontSize: 12, fontWeight: 600, color: '#15803d',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
             {Object.keys(predictions).length} of {machines.length} machines predicted
           </div>
         )}
       </div>
 
-      {/* ── Bar chart ──────────────────────────────────────────────────
-           Uses predRows (shared state) — always shows all 10 machines.
-           Bars are placeholder grey when days is null (not yet predicted).
-           ─────────────────────────────────────────────────────────── */}
+      {/* ── Bar chart (shared predRows) ─────────────────────────────── */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '22px 24px', marginBottom: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 3 }}>Days Until Service — All Machines</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 3 }}>
+              Days Until Service — All Machines
+            </div>
             <div style={{ fontSize: 12, color: '#94a3b8' }}>
               {hasPredictions ? 'ML predictions based on latest sensor readings' : 'Run predictions to populate this chart'}
             </div>
@@ -298,8 +314,7 @@ export default function PredictionsPage() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(260, predRows.length * 36)}>
-            <BarChart layout="vertical" data={predRows}
-              margin={{ top: 0, right: 48, left: 10, bottom: 0 }}>
+            <BarChart layout="vertical" data={predRows} margin={{ top: 0, right: 48, left: 10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}
                 label={{ value: 'Days Until Service', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: '#94a3b8' }}
@@ -314,10 +329,7 @@ export default function PredictionsPage() {
               <Bar dataKey="days" radius={[0, 4, 4, 0]} maxBarSize={24}
                 label={{ position: 'right', formatter: v => v != null ? `${v}d` : '', fontSize: 11, fill: '#475569', fontWeight: 600 }}>
                 {predRows.map(row => (
-                  <Cell key={row.id}
-                    fill={barColor(row.days)}
-                    fillOpacity={row.days != null ? 1 : 0.18}
-                  />
+                  <Cell key={row.id} fill={barColor(row.days)} fillOpacity={row.days != null ? 1 : 0.18} />
                 ))}
               </Bar>
             </BarChart>
@@ -325,10 +337,7 @@ export default function PredictionsPage() {
         )}
       </div>
 
-      {/* ── Results table ─────────────────────────────────────────────
-           Uses same predRows — always 10 rows.
-           Extra table-only columns: machine type, anomaly score.
-           ─────────────────────────────────────────────────────────── */}
+      {/* ── Results table (same predRows) ──────────────────────────── */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
@@ -336,7 +345,7 @@ export default function PredictionsPage() {
           </span>
           {hasPredictions && !running && (
             <span style={{ fontSize: 11, color: '#94a3b8' }}>
-              Chart and table share the same prediction data
+              Results persisted · chart and table share the same data
             </span>
           )}
         </div>
@@ -345,10 +354,10 @@ export default function PredictionsPage() {
             <thead>
               <tr>
                 <th style={TH}>Machine</th>
-                <th style={TH}>Type</th>          {/* table-only */}
+                <th style={TH}>Type</th>
                 <th style={TH}>Current Status</th>
                 <th style={TH}>Days Until Service</th>
-                <th style={TH}>Anomaly Score</th>  {/* table-only */}
+                <th style={TH}>Anomaly Score</th>
                 <th style={TH}>Predicted Status</th>
                 <th style={{ ...TH, textAlign: 'right' }}>Detail</th>
               </tr>
@@ -363,17 +372,15 @@ export default function PredictionsPage() {
                     </tr>
                   ))
                 : predRows.map((row, idx) => {
-                    // Show skeleton for this row if it hasn't been predicted yet while running
                     const isPending = running && progress <= idx;
                     const daysColor = row.days != null ? barColor(row.days) : null;
-
                     return (
                       <tr key={row.id}
                         style={{ transition: 'background 0.12s' }}
                         onMouseEnter={e => e.currentTarget.style.background = '#fafbff'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
-                        {/* Machine name */}
+                        {/* Machine */}
                         <td style={TD}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <div style={{ width: 32, height: 32, borderRadius: 8, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', flexShrink: 0 }}>
@@ -385,7 +392,7 @@ export default function PredictionsPage() {
                           </div>
                         </td>
 
-                        {/* Type (table-only) */}
+                        {/* Type */}
                         <td style={{ ...TD, color: '#64748b' }}>
                           <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '2px 8px', fontSize: 12 }}>
                             {row.type}
@@ -395,7 +402,7 @@ export default function PredictionsPage() {
                         {/* Current status */}
                         <td style={TD}><StatusBadge status={row.currentStatus} /></td>
 
-                        {/* Days until service — shared with chart */}
+                        {/* Days until service */}
                         <td style={TD}>
                           {isPending ? (
                             <Sk w={60} h={13} r={4} />
@@ -413,25 +420,27 @@ export default function PredictionsPage() {
                           )}
                         </td>
 
-                        {/* Anomaly score (table-only) */}
+                        {/* Anomaly score */}
                         <td style={TD}>
                           {isPending ? <Sk w={100} h={13} r={4} /> : <AnomalyPill score={row.anomalyScore} />}
                         </td>
 
-                        {/* Predicted status — shared with chart */}
+                        {/* Predicted status */}
                         <td style={TD}>
                           {isPending ? (
                             <Sk w={70} h={22} r={999} />
                           ) : row.predictedStatus && row.predictedStatus !== 'model_not_trained' ? (
                             <StatusBadge status={row.predictedStatus} />
                           ) : row.predictedStatus === 'model_not_trained' ? (
-                            <span style={{ fontSize: 11, color: '#94a3b8', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '2px 8px' }}>Model not trained</span>
+                            <span style={{ fontSize: 11, color: '#94a3b8', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '2px 8px' }}>
+                              Model not trained
+                            </span>
                           ) : (
                             <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>
                           )}
                         </td>
 
-                        {/* Detail link */}
+                        {/* Detail */}
                         <td style={{ ...TD, textAlign: 'right' }}>
                           <Link to={`/machine/${row.id}`}>
                             <button style={{
@@ -444,7 +453,9 @@ export default function PredictionsPage() {
                               onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#0f172a'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
                             >
                               View
-                              <svg width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                              <svg width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                <polyline points="9 18 15 12 9 6"/>
+                              </svg>
                             </button>
                           </Link>
                         </td>
