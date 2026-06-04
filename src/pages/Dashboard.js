@@ -10,7 +10,7 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import { api, getCached } from '../utils/api';
+import { api, getCached, getMachines, getAllLogs, getMachineReadings } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk, StatCardSkeleton, MachineCardSkeleton } from '../components/Skeleton';
 
@@ -529,12 +529,12 @@ export default function Dashboard() {
 
   /* ── Hydrate from cache then fetch fresh data (stale-while-revalidate) ── */
   useEffect(() => {
-    /** Apply a dashboard payload (from cache or network) to all state slices. */
+    /** Apply a dashboard aggregate payload to all state slices. */
     function applyDashboard(d) {
       const mData = Array.isArray(d.machines) ? d.machines : [];
       const lData = Array.isArray(d.logs)     ? d.logs     : [];
       const t3    = getTop3Critical(mData);
-      const arrays = t3.map(m => (d.top3_readings?.[String(m.id)] || []));
+      const arrays = t3.map(m => d.top3_readings?.[String(m.id)] || []);
 
       setMachines(mData);
       setTop3(t3);
@@ -544,21 +544,54 @@ export default function Dashboard() {
       setChartsLoading(false);
     }
 
+    /** Fallback: individual calls used when the aggregate endpoint is not yet
+     *  deployed on the backend (e.g. during a rolling Kubernetes update). */
+    function fetchIndividual() {
+      let top3Local = [];
+      Promise.all([getMachines(), getAllLogs()])
+        .then(([machRes, logsRes]) => {
+          const mData = Array.isArray(machRes.data) ? machRes.data : [];
+          const lData = Array.isArray(logsRes.data) ? logsRes.data : [];
+          setMachines(mData);
+          setLoading(false);
+          setCostData(buildCostData(mData, lData));
+          top3Local = getTop3Critical(mData);
+          setTop3(top3Local);
+          if (!top3Local.length) {
+            setChartsLoading(false);
+            return Promise.resolve([]);
+          }
+          return Promise.all(top3Local.map(m => getMachineReadings(m.id, 60)));
+        })
+        .then(responses => {
+          if (!Array.isArray(responses) || !responses.length) return;
+          const readingsArrays = responses.map(r =>
+            Array.isArray(r?.data) ? r.data : [],
+          );
+          setSensorData(buildTrendData(top3Local, readingsArrays));
+          setChartsLoading(false);
+        })
+        .catch(() => { setLoading(false); setChartsLoading(false); });
+    }
+
     // 1. Immediately paint from cache (instant render on repeat visits)
     const cached = getCached('/api/dashboard/');
     if (cached) applyDashboard(cached);
 
-    // 2. Always fetch fresh data in the background — the response interceptor
-    //    in api.js will update the localStorage cache automatically.
+    // 2. Try the fast aggregate endpoint; if the backend hasn't deployed it
+    //    yet (404 / 502) fall back gracefully to individual calls.
     api.get('/api/dashboard/')
-      .then(res => applyDashboard(res.data))
-      .catch(err => {
-        console.warn('Dashboard fetch failed:', err?.message);
-        // Only clear loading state if we have nothing to show
-        if (!cached) {
-          setLoading(false);
-          setChartsLoading(false);
+      .then(res => {
+        // Validate the response looks like an aggregate payload before applying
+        if (res.data && Array.isArray(res.data.machines)) {
+          applyDashboard(res.data);
+        } else {
+          fetchIndividual();
         }
+      })
+      .catch(() => {
+        console.info('[dashboard] Aggregate endpoint unavailable — using individual calls');
+        fetchIndividual();
       });
   }, []);
 
