@@ -250,6 +250,9 @@ function SensorTrend({ trendData, top3, loading }) {
    Chart 2 — Fleet status donut
    ───────────────────────────────────────────────────────────── */
 function StatusDonut({ machines, loading }) {
+  const [hoveredSlice, setHoveredSlice] = useState(null);
+  const [mousePos, setMousePos]         = useState({ x: 0, y: 0 });
+
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0, unknown: 0 };
     machines.forEach(m => {
@@ -276,8 +279,15 @@ function StatusDonut({ machines, loading }) {
         ? <ChartEmpty message="No machines registered yet" />
         : (
           <>
-            {/* Donut + center label */}
-            <div style={{ position: 'relative', height: 180 }}>
+            {/* Donut + center label + floating tooltip */}
+            <div
+              style={{ position: 'relative', height: 180 }}
+              onMouseMove={e => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+              }}
+              onMouseLeave={() => setHoveredSlice(null)}
+            >
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -291,12 +301,13 @@ function StatusDonut({ machines, loading }) {
                     strokeWidth={0}
                     startAngle={90}
                     endAngle={-270}
+                    onMouseEnter={(data) => setHoveredSlice(data)}
+                    onMouseLeave={() => setHoveredSlice(null)}
                   >
                     {donutData.map((entry, i) => (
                       <Cell key={i} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip content={<DonutTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
 
@@ -317,6 +328,27 @@ function StatusDonut({ machines, loading }) {
                   }}>assets</div>
                 </div>
               </div>
+
+              {/* Custom floating tooltip — follows cursor, never overlaps the donut hole */}
+              {hoveredSlice && (
+                <div style={{
+                  position: 'absolute',
+                  left: mousePos.x + 14,
+                  top: mousePos.y - 14,
+                  pointerEvents: 'none',
+                  zIndex: 20,
+                  ...TOOLTIP_STYLE,
+                  whiteSpace: 'nowrap',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: hoveredSlice.color, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600, color: '#374151' }}>{hoveredSlice.name}</span>
+                  </div>
+                  <span style={{ color: '#64748b' }}>
+                    {hoveredSlice.value} machine{hoveredSlice.value !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Legend */}
