@@ -1,8 +1,14 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
   "rewrites": [
     {
       "source": "/api/:path*",
       "destination": "http://a26140169fa9248c4b5caa1248d8d2ee-1698140667.us-east-2.elb.amazonaws.com:8000/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
