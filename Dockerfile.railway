@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Railway-specific Dockerfile
+#
+# Railway builds from the repository root as its Docker build context, so this
+# file copies from the backend/ subdirectory explicitly.
+#
+# backend/Dockerfile is still used for local `docker build` runs (executed from
+# inside the backend/ directory where COPY paths are relative to that folder).
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first (layer-cached separately from source code)
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the FastAPI application source
+COPY backend/ .
+
+# Railway injects $PORT at runtime; fall back to 8000 for local usage.
+ARG PORT=8000
+ENV PORT=${PORT}
+EXPOSE ${PORT}
+
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}

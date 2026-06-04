@@ -236,7 +236,7 @@ The backend is pre-configured for [Railway](https://railway.app) with `backend/r
 
 1. **Create a new Railway project** at [railway.app](https://railway.app) and connect your GitHub repository.
 
-2. **Set the root directory** to `backend` in the Railway service settings so it builds from `backend/Dockerfile`.
+2. **No root-directory change needed** — a root-level `railway.json` tells Railway to build using `Dockerfile.railway` (which copies from `backend/`) so it never auto-detects the React `package.json` or tries to run `npm ci`.
 
 3. **Add a PostgreSQL plugin** — Railway provisions a managed Postgres instance and automatically injects `DATABASE_URL` into your service.
 
