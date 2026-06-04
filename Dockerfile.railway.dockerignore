@@ -1,0 +1,50 @@
+# ── Dockerfile.railway.dockerignore ──────────────────────────────────────────
+# Ignore rules applied when Railway builds from the repo root using
+# Dockerfile.railway.  The backend/ directory MUST remain in the build context
+# so the COPY instructions in Dockerfile.railway can find it.
+#
+# The root .dockerignore excludes backend/ for the frontend Docker build
+# (docker build -f docker/frontend/Dockerfile .) — this file overrides that
+# for the Railway/backend build path.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Git
+.git
+.gitignore
+.github
+
+# Frontend source — not needed by the backend image
+src/
+public/
+node_modules/
+package.json
+package-lock.json
+frontend/
+docker/
+
+# Backend virtualenv / compiled artefacts (never commit these anyway)
+backend/venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/*.pyc
+backend/*.pyo
+backend/model.pkl
+
+# Infrastructure manifests
+infrastructure/
+
+# Local env overrides (never bake into the image)
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docs & top-level config (not needed at runtime)
+README.md
+DEPLOYMENT_CHECKLIST.md
+docker-compose.yml
+vercel.json
+Dockerfile.railway
+railway.json
