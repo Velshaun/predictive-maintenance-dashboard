@@ -150,7 +150,7 @@ def add_sensor_reading(reading: SensorReadingCreate, db: Session = Depends(get_d
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
 
-    db_reading = SensorReading(**reading.dict())
+    db_reading = SensorReading(**reading.model_dump())
     db.add(db_reading)
 
     status = 'green'

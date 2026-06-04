@@ -20,6 +20,32 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+// ── Dead-base-URL fallback ────────────────────────────────────────────────────
+// If REACT_APP_API_URL is set (e.g., a stale AWS ALB URL that was destroyed)
+// but the target is unreachable (network error / no response), automatically
+// retry the request using a relative path so the Vercel proxy can handle it.
+//
+// This makes the app resilient to stale Vercel project env-var configuration.
+// When API_BASE is empty (the default), this interceptor is never registered.
+if (API_BASE) {
+  api.interceptors.response.use(
+    response => response,
+    async error => {
+      // Only retry on true network errors (no response received from server).
+      // Do NOT retry on 4xx/5xx — those are valid error responses from a live server.
+      const isNetworkError = !error.response;
+      if (isNetworkError && error.config && !error.config._proxyRetried) {
+        console.warn(
+          '[api] Network error using REACT_APP_API_URL — retrying via Vercel proxy:',
+          error.message,
+        );
+        return api.request({ ...error.config, baseURL: '', _proxyRetried: true });
+      }
+      return Promise.reject(error);
+    },
+  );
+}
+
 // ── Stale-while-revalidate response cache ────────────────────────────────────
 // Successful GET responses are stored in localStorage (persists across page
 // reloads and tabs) for up to CACHE_TTL_MS.  Pages hydrate from this cache

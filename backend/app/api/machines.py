@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.machine import Machine, MaintenanceLog, SensorReading
+from app.models.machine import Machine, MaintenanceLog, SensorReading, _utcnow
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
 router = APIRouter()
 
@@ -52,7 +51,7 @@ def get_machine(machine_id: int, db: Session = Depends(get_db)):
 # ── Create machine ────────────────────────────────────────────────────────────
 @router.post('/')
 def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
-    db_machine = Machine(**machine.dict())
+    db_machine = Machine(**machine.model_dump())
     db.add(db_machine)
     db.commit()
     db.refresh(db_machine)
@@ -70,7 +69,7 @@ def soft_delete_machine(machine_id: int, db: Session = Depends(get_db)):
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
     machine.is_deleted = True
-    machine.deleted_at = datetime.utcnow()
+    machine.deleted_at = _utcnow()
     db.commit()
     return {'message': f'Machine {machine_id} soft-deleted', 'deleted_at': machine.deleted_at}
 
@@ -114,7 +113,7 @@ def get_machine_logs(machine_id: int, db: Session = Depends(get_db)):
 
 @router.post('/logs')
 def add_log(log: LogCreate, db: Session = Depends(get_db)):
-    db_log = MaintenanceLog(**log.dict())
+    db_log = MaintenanceLog(**log.model_dump())
     db.add(db_log)
     db.commit()
     db.refresh(db_log)

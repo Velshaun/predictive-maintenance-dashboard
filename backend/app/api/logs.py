@@ -3,8 +3,6 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.machine import MaintenanceLog
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 router = APIRouter()
 
@@ -31,7 +29,7 @@ def get_log(log_id: int, db: Session = Depends(get_db)):
 
 @router.post('/')
 def create_log(log: LogCreate, db: Session = Depends(get_db)):
-    db_log = MaintenanceLog(**log.dict())
+    db_log = MaintenanceLog(**log.model_dump())
     db.add(db_log)
     db.commit()
     db.refresh(db_log)

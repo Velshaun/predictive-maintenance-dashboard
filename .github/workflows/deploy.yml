@@ -7,25 +7,17 @@ on:
     branches: [ develop ]
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_BACKEND:  ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_BACKEND_REPO }}
-  ECR_FRONTEND: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_FRONTEND_REPO }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# ── Deployment architecture ──────────────────────────────────────────────────
+# Backend  → Railway (auto-deploys from GitHub on every push to main)
+# Frontend → Vercel  (auto-deploys from GitHub on every push to main)
+#
+# The CI pipeline's job is to run all tests and verify the live deployment
+# is healthy.  No manual build/push/deploy steps are required.
+#
 # ── Required GitHub Actions secrets ─────────────────────────────────────────
-# AWS_REGION             e.g. us-east-2
-# AWS_ACCOUNT_ID         12-digit AWS account number
-# AWS_ACCESS_KEY_ID      IAM key with ECR push + EKS access
-# AWS_SECRET_ACCESS_KEY
-# ECR_BACKEND_REPO       e.g. maintenance-dashboard-backend
-# ECR_FRONTEND_REPO      e.g. maintenance-dashboard-frontend
-# EKS_CLUSTER_NAME       e.g. maintainiq-cluster
-# DATABASE_URL           PostgreSQL connection string (no trailing whitespace)
-# ANTHROPIC_API_KEY      Claude API key for AI insights
-# ALLOWED_ORIGINS        Comma-separated list of allowed CORS origins
-#                        e.g. https://maintainiq.vercel.app,https://www.maintainiq.vercel.app
-# REACT_APP_API_URL      AWS ALB DNS used in the production React build
-#                        e.g. http://aa98d1adfbfea4c8ca56c8d6dddb606c-1269872415.us-east-2.elb.amazonaws.com
+# (none currently required — Railway and Vercel use their own GitHub integrations)
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -68,91 +60,52 @@ jobs:
         run: CI=true npm test -- --watchAll=false --forceExit
 
       # Build the production bundle — uses .env.production for REACT_APP_API_URL.
-      # Override with a secret so the bundle always targets the live ALB URL
-      # even if .env.production has a placeholder.
+      # REACT_APP_API_URL is intentionally empty in .env.production so the
+      # Vercel proxy handles all /api/* traffic (no direct Railway calls from
+      # the browser needed).
       # DISABLE_ESLINT_PLUGIN prevents ESLint warnings from failing the build
       # when CI=true (CRA treats any warning as a build error in CI mode).
       - name: Build frontend (production bundle)
         env:
-          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+          REACT_APP_API_URL: ""
           DISABLE_ESLINT_PLUGIN: "true"
         run: npm run build
 
-  # ── 2. Deploy to EKS (main branch only) ─────────────────────────────────────
+  # ── 2. Verify live deployments (main branch only) ────────────────────────────
+  # Railway and Vercel both auto-deploy from GitHub — no manual push/deploy needed.
+  # This job confirms the Railway backend is healthy after the push lands.
   deploy:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      # ── Docker builds ────────────────────────────────────────────────────────
-      - name: Build & push backend image
+      - name: Verify Railway backend health
         run: |
-          docker build -t $ECR_BACKEND:$GITHUB_SHA ./backend
-          docker tag  $ECR_BACKEND:$GITHUB_SHA $ECR_BACKEND:latest
-          docker push $ECR_BACKEND:$GITHUB_SHA
-          docker push $ECR_BACKEND:latest
+          echo "Pinging Railway backend health endpoint..."
+          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+                 --max-time 30 \
+                 https://predictive-maintenance-dashboard-production.up.railway.app/health \
+                 || echo "000")
+          echo "HTTP status: $HTTP"
+          if [ "$HTTP" = "200" ]; then
+            echo "✅  Railway backend is healthy"
+          else
+            echo "⚠️  Railway health check returned HTTP $HTTP"
+            echo "    Check the Railway dashboard for deployment logs:"
+            echo "    https://railway.app/dashboard"
+            exit 1
+          fi
 
-      # Build context is the repo root; Dockerfile is at docker/frontend/Dockerfile.
-      # package.json, src/, public/, and .env.production are all at root now.
-      # Pass REACT_APP_API_URL as a build-arg so the production bundle targets
-      # the live ALB even if .env.production has a generic placeholder.
-      - name: Build & push frontend image
+      - name: Deployment summary
         run: |
-          docker build \
-            -f docker/frontend/Dockerfile \
-            --build-arg REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }} \
-            -t $ECR_FRONTEND:$GITHUB_SHA \
-            .
-          docker tag  $ECR_FRONTEND:$GITHUB_SHA $ECR_FRONTEND:latest
-          docker push $ECR_FRONTEND:$GITHUB_SHA
-          docker push $ECR_FRONTEND:latest
-
-      # ── Kubernetes deploy ────────────────────────────────────────────────────
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --region $AWS_REGION \
-            --name   ${{ secrets.EKS_CLUSTER_NAME }}
-
-      - name: Create / update app-secrets in Kubernetes
-        run: |
-          # Strip any trailing whitespace from DATABASE_URL (common copy-paste issue)
-          DB_URL=$(echo -n "${{ secrets.DATABASE_URL }}" | tr -d '[:space:]')
-
-          kubectl create secret generic app-secrets \
-            --from-literal=database-url="${DB_URL}" \
-            --from-literal=anthropic-key="${{ secrets.ANTHROPIC_API_KEY }}" \
-            --from-literal=allowed-origins="${{ secrets.ALLOWED_ORIGINS }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy manifests to EKS
-        run: |
-          # Substitute the YOUR_AWS_ACCOUNT_ID placeholder in both manifests
-          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" \
-            infrastructure/kubernetes/backend-deployment.yml \
-            infrastructure/kubernetes/frontend-deployment.yml
-
-          kubectl apply -f infrastructure/kubernetes/backend-deployment.yml
-          kubectl apply -f infrastructure/kubernetes/frontend-deployment.yml
-
-      - name: Update images to this commit SHA
-        run: |
-          kubectl set image deployment/backend  backend=$ECR_BACKEND:$GITHUB_SHA
-          kubectl set image deployment/frontend frontend=$ECR_FRONTEND:$GITHUB_SHA
-
-      - name: Wait for rollout to complete
-        run: |
-          kubectl rollout status deployment/backend  --timeout=10m
-          kubectl rollout status deployment/frontend --timeout=10m
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ✅  All tests passed"
+          echo "  ✅  Production build succeeded"
+          echo "  ✅  Railway backend is healthy"
+          echo ""
+          echo "  Auto-deployment targets (triggered by this push):"
+          echo "  • Backend  → Railway  (auto-deploys via GitHub integration)"
+          echo "  • Frontend → Vercel   (auto-deploys via GitHub integration)"
+          echo ""
+          echo "  Railway: https://predictive-maintenance-dashboard-production.up.railway.app"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

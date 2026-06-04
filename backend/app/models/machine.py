@@ -1,7 +1,12 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
+
+
+def _utcnow() -> datetime:
+    """Return current UTC time as a naive datetime (consistent with existing DB rows)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Machine(Base):
@@ -13,7 +18,7 @@ class Machine(Base):
     location = Column(String)
     status = Column(String, default='green')  # green, yellow, red
     last_serviced = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     # Soft-delete support
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -30,7 +35,7 @@ class MaintenanceLog(Base):
     description = Column(Text)
     technician = Column(String)
     cost = Column(Float)
-    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
+    logged_at = Column(DateTime, default=_utcnow, index=True)
 
     machine = relationship('Machine', back_populates='logs')
 
@@ -44,6 +49,6 @@ class SensorReading(Base):
     vibration = Column(Float)
     pressure = Column(Float)
     runtime_hours = Column(Float)
-    recorded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    recorded_at = Column(DateTime, default=_utcnow, index=True)
 
     machine = relationship('Machine', back_populates='readings')
