@@ -10,6 +10,18 @@ export const api = axios.create({
   baseURL: API_BASE,
 });
 
+// ── Cache-busting interceptor ────────────────────────────────────────────
+// Append a timestamp query param (?_t=<ms>) to every GET request so the
+// browser cache and Vercel's edge CDN can never return a stale 304 response.
+// Without this, a previously-cached empty or error response would silently
+// cause all pages to show no data.
+api.interceptors.request.use(config => {
+  if (!config.method || config.method.toLowerCase() === 'get') {
+    config.params = { ...config.params, _t: Date.now() };
+  }
+  return config;
+});
+
 export const getMachines             = ()     => api.get('/api/machines/');
 export const getMachine              = (id)   => api.get(`/api/machines/${id}`);
 export const createMachine           = (data) => api.post('/api/machines/', data);
