@@ -42,6 +42,15 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: anthropic-key
+            # CORS — allow requests from the Vercel frontend and any additional origins.
+            # Set the 'allowed-origins' key in the app-secrets Kubernetes secret to a
+            # comma-separated list, e.g.:
+            #   https://maintainiq.vercel.app,https://www.maintainiq.vercel.app
+            - name: ALLOWED_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: allowed-origins
 ---
 apiVersion: v1
 kind: Service

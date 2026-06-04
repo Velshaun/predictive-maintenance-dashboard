@@ -8,51 +8,76 @@ on:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_BACKEND: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_BACKEND_REPO }}
+  ECR_BACKEND:  ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_BACKEND_REPO }}
   ECR_FRONTEND: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_FRONTEND_REPO }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# ── Required GitHub Actions secrets ─────────────────────────────────────────
+# AWS_REGION             e.g. us-east-2
+# AWS_ACCOUNT_ID         12-digit AWS account number
+# AWS_ACCESS_KEY_ID      IAM key with ECR push + EKS access
+# AWS_SECRET_ACCESS_KEY
+# ECR_BACKEND_REPO       e.g. maintenance-dashboard-backend
+# ECR_FRONTEND_REPO      e.g. maintenance-dashboard-frontend
+# EKS_CLUSTER_NAME       e.g. maintainiq-cluster
+# DATABASE_URL           PostgreSQL connection string (no trailing whitespace)
+# ANTHROPIC_API_KEY      Claude API key for AI insights
+# ALLOWED_ORIGINS        Comma-separated list of allowed CORS origins
+#                        e.g. https://maintainiq.vercel.app,https://www.maintainiq.vercel.app
+# REACT_APP_API_URL      AWS ALB DNS / API Gateway URL used in the production
+#                        React build, e.g. https://api.maintainiq.com
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
+  # ── 1. Test & build ──────────────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # ── Backend (Python) ─────────────────────────────────────────────────────
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install backend deps
+      - name: Install backend dependencies
         run: |
           cd backend
           pip install -r requirements.txt
 
-      - name: Run backend tests
+      - name: Run backend tests (pytest)
         run: |
           cd backend
-          python -m pytest tests/ -v || echo 'No tests yet'
+          python -m pytest tests/ -v --tb=short
 
+      # ── Frontend (Node) ──────────────────────────────────────────────────────
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: |
           cd frontend
-          npm install
+          npm ci
 
-      - name: Run frontend tests
+      - name: Run frontend tests (Jest)
         run: |
           cd frontend
           CI=true npm test -- --watchAll=false --forceExit
 
-      - name: Build frontend
+      # Build the production bundle — uses .env.production for REACT_APP_API_URL.
+      # Override with a secret so the bundle always targets the live ALB URL
+      # even if .env.production has a placeholder.
+      - name: Build frontend (production bundle)
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
         run: |
           cd frontend
           npm run build
 
+  # ── 2. Deploy to EKS (main branch only) ─────────────────────────────────────
   deploy:
     needs: test
     runs-on: ubuntu-latest
@@ -63,50 +88,66 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & Push Backend
+      # ── Docker builds ────────────────────────────────────────────────────────
+      - name: Build & push backend image
         run: |
           docker build -t $ECR_BACKEND:$GITHUB_SHA ./backend
-          docker tag $ECR_BACKEND:$GITHUB_SHA $ECR_BACKEND:latest
+          docker tag  $ECR_BACKEND:$GITHUB_SHA $ECR_BACKEND:latest
           docker push $ECR_BACKEND:$GITHUB_SHA
           docker push $ECR_BACKEND:latest
 
-      - name: Build & Push Frontend
+      # Pass REACT_APP_API_URL as a build-arg so the production bundle targets
+      # the live ALB even if .env.production has a generic placeholder.
+      - name: Build & push frontend image
         run: |
-          docker build -t $ECR_FRONTEND:$GITHUB_SHA ./frontend
-          docker tag $ECR_FRONTEND:$GITHUB_SHA $ECR_FRONTEND:latest
+          docker build \
+            --build-arg REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }} \
+            -t $ECR_FRONTEND:$GITHUB_SHA ./frontend
+          docker tag  $ECR_FRONTEND:$GITHUB_SHA $ECR_FRONTEND:latest
           docker push $ECR_FRONTEND:$GITHUB_SHA
           docker push $ECR_FRONTEND:latest
 
+      # ── Kubernetes deploy ────────────────────────────────────────────────────
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name ${{ secrets.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name   ${{ secrets.EKS_CLUSTER_NAME }}
 
-      - name: Deploy to EKS
+      - name: Create / update app-secrets in Kubernetes
         run: |
-          # Substitute account ID placeholder in manifests
-          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/backend-deployment.yml
-          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" infrastructure/kubernetes/frontend-deployment.yml
-
-          # Create/update app-secrets (strip trailing whitespace from DATABASE_URL)
+          # Strip any trailing whitespace from DATABASE_URL (common copy-paste issue)
           DB_URL=$(echo -n "${{ secrets.DATABASE_URL }}" | tr -d '[:space:]')
+
           kubectl create secret generic app-secrets \
             --from-literal=database-url="${DB_URL}" \
             --from-literal=anthropic-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=allowed-origins="${{ secrets.ALLOWED_ORIGINS }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          # Apply manifests (creates deployments if they don't exist)
+      - name: Deploy manifests to EKS
+        run: |
+          # Substitute the YOUR_AWS_ACCOUNT_ID placeholder in both manifests
+          sed -i "s|YOUR_AWS_ACCOUNT_ID|${{ secrets.AWS_ACCOUNT_ID }}|g" \
+            infrastructure/kubernetes/backend-deployment.yml \
+            infrastructure/kubernetes/frontend-deployment.yml
+
           kubectl apply -f infrastructure/kubernetes/backend-deployment.yml
           kubectl apply -f infrastructure/kubernetes/frontend-deployment.yml
 
-          # Update to the exact image built in this run
-          kubectl set image deployment/backend backend=$ECR_BACKEND:$GITHUB_SHA
+      - name: Update images to this commit SHA
+        run: |
+          kubectl set image deployment/backend  backend=$ECR_BACKEND:$GITHUB_SHA
           kubectl set image deployment/frontend frontend=$ECR_FRONTEND:$GITHUB_SHA
-          kubectl rollout status deployment/backend --timeout=10m
+
+      - name: Wait for rollout to complete
+        run: |
+          kubectl rollout status deployment/backend  --timeout=10m
           kubectl rollout status deployment/frontend --timeout=10m
