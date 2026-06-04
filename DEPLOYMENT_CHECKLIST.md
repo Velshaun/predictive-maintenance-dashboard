@@ -15,7 +15,15 @@
 | `api.js` uses `process.env.REACT_APP_API_URL \|\| ''` as base URL | ☐ | Verified — falls back to same-origin proxy in dev |
 | All API calls go through the shared `api` axios instance | ☐ | No hardcoded `http://localhost:8000` in source |
 
-**How to verify:** Run `grep -r "localhost:8000" frontend/src/` — should return no results.
+**Live Load Balancer URL (EKS):**
+```
+http://aa98d1adfbfea4c8ca56c8d6dddb606c-1269872415.us-east-2.elb.amazonaws.com
+```
+- `frontend-service` (LoadBalancer) → port 80 → nginx → React app
+- `backend-service` (ClusterIP, internal) → port 8000 → FastAPI
+- nginx proxies `/api/*` → `backend-service:8000` inside the cluster
+
+**How to verify:** Run `grep -r "localhost:8000" frontend/src/` — should return no results (placeholder/hint strings in SettingsPage are OK).
 
 ---
 
@@ -182,7 +190,7 @@ CI=true npm test -- --watchAll=false --forceExit
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/db` |
 | `ANTHROPIC_API_KEY` | `sk-ant-…` |
 | `ALLOWED_ORIGINS` | `https://maintainiq.vercel.app,https://www.maintainiq.vercel.app` |
-| `REACT_APP_API_URL` | `https://api.maintainiq.com` |
+| `REACT_APP_API_URL` | `http://aa98d1adfbfea4c8ca56c8d6dddb606c-1269872415.us-east-2.elb.amazonaws.com` |
 
 ---
 

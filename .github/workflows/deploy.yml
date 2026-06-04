@@ -24,8 +24,8 @@ env:
 # ANTHROPIC_API_KEY      Claude API key for AI insights
 # ALLOWED_ORIGINS        Comma-separated list of allowed CORS origins
 #                        e.g. https://maintainiq.vercel.app,https://www.maintainiq.vercel.app
-# REACT_APP_API_URL      AWS ALB DNS / API Gateway URL used in the production
-#                        React build, e.g. https://api.maintainiq.com
+# REACT_APP_API_URL      AWS ALB DNS used in the production React build
+#                        e.g. http://aa98d1adfbfea4c8ca56c8d6dddb606c-1269872415.us-east-2.elb.amazonaws.com
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -52,20 +52,17 @@ jobs:
           python -m pytest tests/ -v --tb=short
 
       # ── Frontend (Node) ──────────────────────────────────────────────────────
+      # package.json is now at the repo root — no need to cd frontend.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
+        run: npm ci
 
       - name: Run frontend tests (Jest)
-        run: |
-          cd frontend
-          CI=true npm test -- --watchAll=false --forceExit
+        run: CI=true npm test -- --watchAll=false --forceExit
 
       # Build the production bundle — uses .env.production for REACT_APP_API_URL.
       # Override with a secret so the bundle always targets the live ALB URL
@@ -73,9 +70,7 @@ jobs:
       - name: Build frontend (production bundle)
         env:
           REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
-        run: |
-          cd frontend
-          npm run build
+        run: npm run build
 
   # ── 2. Deploy to EKS (main branch only) ─────────────────────────────────────
   deploy:
@@ -103,13 +98,17 @@ jobs:
           docker push $ECR_BACKEND:$GITHUB_SHA
           docker push $ECR_BACKEND:latest
 
+      # Build context is the repo root; Dockerfile is at docker/frontend/Dockerfile.
+      # package.json, src/, public/, and .env.production are all at root now.
       # Pass REACT_APP_API_URL as a build-arg so the production bundle targets
       # the live ALB even if .env.production has a generic placeholder.
       - name: Build & push frontend image
         run: |
           docker build \
+            -f docker/frontend/Dockerfile \
             --build-arg REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }} \
-            -t $ECR_FRONTEND:$GITHUB_SHA ./frontend
+            -t $ECR_FRONTEND:$GITHUB_SHA \
+            .
           docker tag  $ECR_FRONTEND:$GITHUB_SHA $ECR_FRONTEND:latest
           docker push $ECR_FRONTEND:$GITHUB_SHA
           docker push $ECR_FRONTEND:latest

@@ -1,0 +1,38 @@
+# ── .dockerignore (repo-root build context for docker/frontend/Dockerfile) ───
+# Prevents the backend, infrastructure, and large Node artefacts from being
+# sent to the Docker daemon when building the frontend image with:
+#   docker build -f docker/frontend/Dockerfile .
+
+# Git
+.git
+.gitignore
+.github
+
+# Backend — not needed by the frontend Docker build
+backend/
+
+# Infrastructure — Terraform/K8s manifests are not needed inside the image
+infrastructure/
+
+# Dev artefacts
+node_modules/
+build/
+frontend/node_modules/
+frontend/build/
+frontend/src/
+frontend/public/
+
+# Local env overrides (never bake into the image)
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docs
+README.md
+DEPLOYMENT_CHECKLIST.md
+docker-compose.yml
+# NOTE: docker/frontend/nginx.conf must remain in the build context —
+# the Dockerfile copies it into the nginx image.  Only exclude the
+# backend Dockerfile (which isn't needed for the frontend build).
+docker/frontend/Dockerfile
