@@ -148,7 +148,7 @@ export default function PredictionsPage() {
   }, []);
 
   useEffect(() => {
-    getMachines().then(r => setMachines(r.data)).finally(() => setLoading(false));
+    getMachines().then(r => setMachines(Array.isArray(r.data) ? r.data : [])).finally(() => setLoading(false));
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -192,7 +192,7 @@ export default function PredictionsPage() {
     setRunning(false);
     if (successCount === 0) { setRunError('All predictions failed. Check that the backend is reachable and try again.'); return; }
     savePredictions(results);
-    getMachines().then(r => setMachines(r.data));
+    getMachines().then(r => setMachines(Array.isArray(r.data) ? r.data : []));
   }, [machines, predictions, running, loading, savePredictions]);
 
   const handleMarkServiced = useCallback((id, name) => setServicingMachine({ id, name }), []);
@@ -208,7 +208,7 @@ export default function PredictionsPage() {
     savePredictions(newPreds);
     try { await addLog({ machine_id: id, description: 'Serviced via MaintainIQ — status reset', technician: 'System', cost: 0 }); }
     catch (e) { console.warn('Service log entry failed:', e?.message); }
-    getMachines().then(r => setMachines(r.data));
+    getMachines().then(r => setMachines(Array.isArray(r.data) ? r.data : []));
   }, [servicingMachine, predictions, savePredictions]);
 
   /* ── Build rows ──────────────────────────────────────────────────── */

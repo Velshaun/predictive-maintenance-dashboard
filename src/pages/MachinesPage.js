@@ -146,7 +146,7 @@ export default function MachinesPage() {
 
   useEffect(() => {
     getMachines()
-      .then(r => setMachines(r.data))
+      .then(r => setMachines(Array.isArray(r.data) ? r.data : []))
       .finally(() => setLoading(false));
   }, []);
 
@@ -283,7 +283,7 @@ export default function MachinesPage() {
     } catch (e) {
       console.warn('Service log failed:', e?.message);
     }
-    getMachines().then(r => setMachines(r.data));
+    getMachines().then(r => setMachines(Array.isArray(r.data) ? r.data : []));
   }, [serviceModal]);
 
   /* ── Sort / filter ───────────────────────────────────────── */

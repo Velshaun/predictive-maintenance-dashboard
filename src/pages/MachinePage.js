@@ -68,7 +68,7 @@ export default function MachinePage() {
 
   useEffect(() => {
     getMachine(id).then(r => setMachine(r.data));
-    getMachineLogs(id).then(r => setLogs(r.data));
+    getMachineLogs(id).then(r => setLogs(Array.isArray(r.data) ? r.data : []));
   }, [id]);
 
   const handlePredict = async () => {
