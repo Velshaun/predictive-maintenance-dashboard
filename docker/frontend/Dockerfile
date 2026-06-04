@@ -5,8 +5,10 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 # Install dependencies first (layer-cached unless package*.json changes)
+# Use npm install (not npm ci) — the lock file is generated on Windows and
+# may omit Linux optional packages, causing npm ci to fail on alpine/Linux.
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm install --legacy-peer-deps
 
 COPY src ./src
 COPY public ./public
