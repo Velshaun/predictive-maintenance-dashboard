@@ -1,12 +1,16 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getMachines, createMachine, deleteMachine } from '../utils/api';
+import {
+  getMachines, createMachine,
+  softDeleteMachine, restoreMachine, permanentDeleteMachine,
+} from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
 
-const PRED_STORAGE_KEY = 'pm_prediction_results';
+const PRED_KEY    = 'pm_prediction_results';
+const DELETED_KEY = 'deleted_machines';
 
-/* ── Status ordering for sort ─────────────────────────────── */
+/* ── Status ordering ──────────────────────────────────────── */
 const STATUS_ORDER = { red: 0, yellow: 1, green: 2, unknown: 3 };
 
 /* ── Sort icon ────────────────────────────────────────────── */
@@ -21,14 +25,12 @@ const SortIcon = ({ dir }) => (
 const TH = {
   padding: '11px 16px', fontSize: 11, fontWeight: 700,
   color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px',
-  borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap',
-  background: '#fafafa',
+  borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap', background: '#fafafa',
 };
 const TD = {
   padding: '14px 16px', fontSize: 13, color: '#0f172a',
   borderBottom: '1px solid #f8fafc', verticalAlign: 'middle',
 };
-
 const inputStyle = {
   height: 36, width: '100%', padding: '0 10px',
   border: '1px solid #e2e8f0', borderRadius: 8,
@@ -36,32 +38,38 @@ const inputStyle = {
   outline: 'none', boxSizing: 'border-box',
 };
 
-/* ── Table skeleton row ───────────────────────────────────── */
+/* ── Skeleton row ─────────────────────────────────────────── */
 const SkRow = () => (
   <tr>
-    <td style={TD}><Sk w={20} h={13} r={4} /></td>
-    <td style={TD}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Sk w={32} h={32} r={8} />
-        <div><Sk w={110} h={13} r={4} style={{ marginBottom: 5 }} /><Sk w={70} h={10} r={4} /></div>
-      </div>
-    </td>
-    <td style={TD}><Sk w={100} h={13} r={4} /></td>
-    <td style={TD}><Sk w={120} h={13} r={4} /></td>
-    <td style={TD}><Sk w={80} h={22} r={999} /></td>
-    <td style={TD}><Sk w={90} h={13} r={4} /></td>
-    <td style={TD}><Sk w={60} h={30} r={8} /></td>
+    {[20, 140, 100, 120, 80, 90, 80].map((w, i) => (
+      <td key={i} style={TD}><Sk w={w} h={13} r={4} /></td>
+    ))}
   </tr>
 );
 
+/* ── localStorage helpers ─────────────────────────────────── */
+function loadDeleted() {
+  try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+function saveDeleted(list) {
+  try { localStorage.setItem(DELETED_KEY, JSON.stringify(list)); } catch (_) {}
+}
+function loadPredictions() {
+  try { return JSON.parse(localStorage.getItem(PRED_KEY) || '{}'); } catch (_) { return {}; }
+}
+function savePredictions(data) {
+  try { localStorage.setItem(PRED_KEY, JSON.stringify(data)); } catch (_) {}
+}
+
 /* ══════════════════════════════════════════════════════════ */
 export default function MachinesPage() {
-  const [machines, setMachines]     = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [search, setSearch]         = useState('');
+  const [machines, setMachines]       = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [search, setSearch]           = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortDir, setSortDir]       = useState('desc');
-  const [sortCol, setSortCol]       = useState('status');
+  const [sortDir, setSortDir]         = useState('desc');
+  const [sortCol, setSortCol]         = useState('status');
 
   // Add-machine form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -69,8 +77,16 @@ export default function MachinesPage() {
   const [saving, setSaving]     = useState(false);
   const [addError, setAddError] = useState(null);
 
-  // Delete state
-  const [deletingId, setDeletingId] = useState(null);
+  // Delete modal
+  const [deleteModal, setDeleteModal] = useState(null); // machine object
+  const [deletingId, setDeletingId]   = useState(null);
+
+  // Deleted machines (from localStorage)
+  const [deletedList, setDeletedList] = useState(loadDeleted);
+
+  // Restore / permanent delete state
+  const [restoringId, setRestoringId]       = useState(null);
+  const [permDeletingId, setPermDeletingId] = useState(null);
 
   useEffect(() => {
     getMachines()
@@ -99,32 +115,96 @@ export default function MachinesPage() {
     }
   }, [addForm]);
 
-  /* ── Delete machine ──────────────────────────────────────── */
-  const handleDelete = useCallback(async (id, name) => {
-    if (!window.confirm(`Delete "${name}"?\n\nThis will permanently remove the machine and all its sensor readings and maintenance logs.`)) return;
-    setDeletingId(id);
+  /* ── Soft delete (confirmed) ─────────────────────────────── */
+  const handleConfirmDelete = useCallback(async () => {
+    const m = deleteModal;
+    if (!m) return;
+    setDeleteModal(null);
+    setDeletingId(m.id);
     try {
-      await deleteMachine(id);
-      setMachines(prev => prev.filter(m => m.id !== id));
-      // Remove from cached prediction results if present
-      try {
-        const saved = localStorage.getItem(PRED_STORAGE_KEY);
-        if (saved) {
-          const data = JSON.parse(saved);
-          if (data.predictions?.[id] !== undefined) {
-            delete data.predictions[id];
-            localStorage.setItem(PRED_STORAGE_KEY, JSON.stringify(data));
-          }
-        }
-      } catch (_) {}
+      await softDeleteMachine(m.id);
+
+      // Snapshot the machine's last prediction so it can be restored later
+      const predData = loadPredictions();
+      const savedPred = predData?.predictions?.[m.id] ?? null;
+
+      // Save to deletedList
+      const newEntry = {
+        id:           m.id,
+        name:         m.name,
+        machine_type: m.machine_type,
+        location:     m.location,
+        status:       m.status,
+        deleted_at:   new Date().toISOString(),
+        prediction:   savedPred,
+      };
+      const next = [...deletedList.filter(d => d.id !== m.id), newEntry];
+      setDeletedList(next);
+      saveDeleted(next);
+
+      // Remove from prediction cache
+      if (predData?.predictions) {
+        delete predData.predictions[m.id];
+        savePredictions(predData);
+      }
+
+      setMachines(prev => prev.filter(x => x.id !== m.id));
     } catch (err) {
       alert(`Failed to delete: ${err?.response?.data?.detail || err.message}`);
     } finally {
       setDeletingId(null);
     }
-  }, []);
+  }, [deleteModal, deletedList]);
 
-  /* ── Sort + filter ───────────────────────────────────────── */
+  /* ── Restore ─────────────────────────────────────────────── */
+  const handleRestore = useCallback(async (entry) => {
+    setRestoringId(entry.id);
+    try {
+      const res = await restoreMachine(entry.id);
+      setMachines(prev => [...prev, res.data]);
+
+      // Re-inject the prediction result if we saved one
+      if (entry.prediction) {
+        const predData = loadPredictions();
+        if (!predData.predictions) predData.predictions = {};
+        predData.predictions[entry.id] = entry.prediction;
+        savePredictions(predData);
+      }
+
+      // Remove from deleted list
+      const next = deletedList.filter(d => d.id !== entry.id);
+      setDeletedList(next);
+      saveDeleted(next);
+    } catch (err) {
+      alert(`Failed to restore: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setRestoringId(null);
+    }
+  }, [deletedList]);
+
+  /* ── Permanent delete ────────────────────────────────────── */
+  const handlePermanentDelete = useCallback(async (entry) => {
+    if (!window.confirm(`Permanently delete "${entry.name}"?\n\nThis cannot be undone.`)) return;
+    setPermDeletingId(entry.id);
+    try {
+      await permanentDeleteMachine(entry.id);
+      const next = deletedList.filter(d => d.id !== entry.id);
+      setDeletedList(next);
+      saveDeleted(next);
+      // Also purge from predictions cache
+      const predData = loadPredictions();
+      if (predData?.predictions?.[entry.id]) {
+        delete predData.predictions[entry.id];
+        savePredictions(predData);
+      }
+    } catch (err) {
+      alert(`Failed: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setPermDeletingId(null);
+    }
+  }, [deletedList]);
+
+  /* ── Sort / filter ───────────────────────────────────────── */
   const handleColSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
@@ -140,15 +220,13 @@ export default function MachinesPage() {
         m.location.toLowerCase().includes(q);
       return matchStatus && matchSearch;
     });
-
     return [...result].sort((a, b) => {
       if (sortCol === 'status') {
         const diff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
         return sortDir === 'asc' ? diff : -diff;
       }
-      if (sortCol === 'name') {
+      if (sortCol === 'name')
         return sortDir === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
-      }
       if (sortCol === 'last_serviced') {
         const da = a.last_serviced ? new Date(a.last_serviced) : new Date(0);
         const db = b.last_serviced ? new Date(b.last_serviced) : new Date(0);
@@ -182,9 +260,56 @@ export default function MachinesPage() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
-      {/* ── Top bar: status chips + search + Add Machine ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      {/* ── Delete confirmation modal ────────────────────────── */}
+      {deleteModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setDeleteModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#fff', borderRadius: 16, padding: '28px 32px',
+            maxWidth: 440, width: '90%', boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="18" height="18" fill="none" stroke="#ef4444" strokeWidth="2" viewBox="0 0 24 24">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>Delete machine?</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>This can be undone from Recently Deleted</div>
+              </div>
+            </div>
 
+            <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#475569' }}>
+              Are you sure you want to delete <strong style={{ color: '#0f172a' }}>{deleteModal.name}</strong>?
+              This action can be undone from the <strong>Recently Deleted</strong> section below.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setDeleteModal(null)} style={{
+                padding: '8px 18px', borderRadius: 8, border: '1px solid #e2e8f0',
+                background: '#fff', fontSize: 13, fontWeight: 600, color: '#64748b', cursor: 'pointer',
+              }}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmDelete} style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg,#dc2626,#ef4444)', color: '#fff',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                boxShadow: '0 3px 8px rgba(239,68,68,0.28)',
+              }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Top bar ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         {/* Status chips */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {!loading && [
@@ -194,27 +319,20 @@ export default function MachinesPage() {
             { label: 'Critical',     val: 'red',    count: counts.red,    color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
           ].map(({ label, val, count, color, bg, border }) => (
             <button key={val} onClick={() => setStatusFilter(val)} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
               border: `1px solid ${statusFilter === val ? border : '#e2e8f0'}`,
               background: statusFilter === val ? bg : '#fff',
               color: statusFilter === val ? color : '#64748b',
               fontSize: 12, fontWeight: 600, transition: 'all 0.12s',
             }}>
-              <span style={{
-                width: 18, height: 18, borderRadius: '50%',
-                background: statusFilter === val ? color : '#e2e8f0',
-                color: '#fff', fontSize: 10, fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>{count}</span>
+              <span style={{ width: 18, height: 18, borderRadius: '50%', background: statusFilter === val ? color : '#e2e8f0', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{count}</span>
               {label}
             </button>
           ))}
         </div>
 
-        {/* Search + Add Machine */}
+        {/* Search + Add */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Search */}
           <div style={{ position: 'relative' }}>
             <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }}
               width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -222,69 +340,45 @@ export default function MachinesPage() {
             </svg>
             <input type="text" placeholder="Search name, type, location…"
               value={search} onChange={e => setSearch(e.target.value)}
-              style={{
-                ...inputStyle, paddingLeft: 32, paddingRight: search ? 30 : 12,
-                width: 240, height: 36,
-              }}
+              style={{ ...inputStyle, paddingLeft: 32, paddingRight: search ? 30 : 12, width: 240, height: 36 }}
               onFocus={e => e.target.style.borderColor = '#3b82f6'}
               onBlur={e => e.target.style.borderColor = '#e2e8f0'}
             />
             {search && (
-              <button onClick={() => setSearch('')} style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', display: 'flex', padding: 0,
-              }}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
+              <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', display: 'flex', padding: 0 }}>
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             )}
           </div>
 
-          {/* Add Machine button */}
           <button onClick={() => { setShowAddForm(v => !v); setAddError(null); }} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '8px 16px', borderRadius: 9, border: 'none', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 9, border: 'none', cursor: 'pointer',
             background: showAddForm ? '#f1f5f9' : 'linear-gradient(135deg,#2563eb,#3b82f6)',
-            color: showAddForm ? '#475569' : '#fff',
-            fontWeight: 600, fontSize: 13,
-            boxShadow: showAddForm ? 'none' : '0 4px 10px rgba(59,130,246,0.30)',
-            transition: 'all 0.15s',
+            color: showAddForm ? '#475569' : '#fff', fontWeight: 600, fontSize: 13,
+            boxShadow: showAddForm ? 'none' : '0 4px 10px rgba(59,130,246,0.30)', transition: 'all 0.15s',
           }}>
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              {showAddForm
-                ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
-                : <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>}
+              {showAddForm ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></> : <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>}
             </svg>
             {showAddForm ? 'Cancel' : 'Add Machine'}
           </button>
         </div>
       </div>
 
-      {/* ── Add Machine inline form ── */}
+      {/* ── Add Machine form ──────────────────────────────────── */}
       {showAddForm && (
-        <div className="fade-slide-up" style={{
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
-          padding: '20px 24px', marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>
-            New Machine
-          </div>
+        <div className="fade-slide-up" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 24px', marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>New Machine</div>
           <form onSubmit={handleAdd}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
               {[
-                { key: 'name',         label: 'Machine Name',  placeholder: 'e.g. Compressor Unit 4' },
-                { key: 'machine_type', label: 'Machine Type',  placeholder: 'e.g. Compressor' },
-                { key: 'location',     label: 'Location',      placeholder: 'e.g. Building A, Floor 2' },
+                { key: 'name',         label: 'Machine Name', placeholder: 'e.g. Compressor Unit 4' },
+                { key: 'machine_type', label: 'Machine Type', placeholder: 'e.g. Compressor' },
+                { key: 'location',     label: 'Location',     placeholder: 'e.g. Building A, Floor 2' },
               ].map(({ key, label, placeholder }) => (
                 <div key={key}>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>
-                    {label}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder={placeholder}
-                    value={addForm[key]}
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>{label}</label>
+                  <input type="text" placeholder={placeholder} value={addForm[key]}
                     onChange={e => setAddForm(prev => ({ ...prev, [key]: e.target.value }))}
                     style={inputStyle}
                     onFocus={e => e.target.style.borderColor = '#3b82f6'}
@@ -293,62 +387,38 @@ export default function MachinesPage() {
                 </div>
               ))}
             </div>
-
             {addError && (
-              <div style={{
-                marginBottom: 12, padding: '7px 12px', borderRadius: 7,
-                background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca',
-                fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
+              <div style={{ marginBottom: 12, padding: '7px 12px', borderRadius: 7, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 {addError}
               </div>
             )}
-
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="submit" disabled={saving} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 8, border: 'none',
+                cursor: saving ? 'not-allowed' : 'pointer',
                 background: saving ? '#f1f5f9' : 'linear-gradient(135deg,#16a34a,#22c55e)',
                 color: saving ? '#94a3b8' : '#fff', fontWeight: 600, fontSize: 13,
-                boxShadow: saving ? 'none' : '0 3px 8px rgba(34,197,94,0.28)',
-                transition: 'all 0.15s',
+                boxShadow: saving ? 'none' : '0 3px 8px rgba(34,197,94,0.28)', transition: 'all 0.15s',
               }}>
-                {saving ? (
-                  <><svg className="spin" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>Saving…</>
-                ) : (
-                  <><svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Save Machine</>
-                )}
+                {saving
+                  ? <><svg className="spin" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>Saving…</>
+                  : <><svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Save Machine</>}
               </button>
-              <button type="button" onClick={() => { setShowAddForm(false); setAddError(null); setAddForm({ name: '', machine_type: '', location: '' }); }} style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0',
-                background: '#fff', fontSize: 13, fontWeight: 600, color: '#64748b',
-                cursor: 'pointer', transition: 'all 0.12s',
-              }}>
-                Cancel
-              </button>
+              <button type="button" onClick={() => { setShowAddForm(false); setAddError(null); setAddForm({ name: '', machine_type: '', location: '' }); }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 13, fontWeight: 600, color: '#64748b', cursor: 'pointer' }}>Cancel</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* ── Table card ── */}
+      {/* ── Active machines table ─────────────────────────────── */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-
-        {/* Header */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
-            {loading ? <Sk w={120} h={13} r={4} /> : (
-              <>{processed.length} of {counts.total} machine{counts.total !== 1 ? 's' : ''}</>
-            )}
+            {loading ? <Sk w={120} h={13} r={4} /> : <>{processed.length} of {counts.total} machine{counts.total !== 1 ? 's' : ''}</>}
           </div>
           {!loading && (search || statusFilter !== 'all') && (
-            <button onClick={() => { setSearch(''); setStatusFilter('all'); }} style={{
-              fontSize: 12, fontWeight: 600, color: '#3b82f6',
-              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-            }}>
+            <button onClick={() => { setSearch(''); setStatusFilter('all'); }} style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
               Clear filters ×
             </button>
           )}
@@ -373,17 +443,9 @@ export default function MachinesPage() {
               ) : processed.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ padding: '52px 32px', textAlign: 'center' }}>
-                    <svg width="56" height="56" viewBox="0 0 64 64" fill="none" style={{ margin: '0 auto 14px', display: 'block' }}>
-                      <circle cx="28" cy="28" r="20" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="2"/>
-                      <line x1="22" y1="28" x2="34" y2="28" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
-                      <line x1="28" y1="22" x2="28" y2="34" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
                     <div style={{ fontSize: 14, fontWeight: 700, color: '#475569', marginBottom: 4 }}>No machines match your filters</div>
                     <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>Try adjusting your search or status filter.</div>
-                    <button onClick={() => { setSearch(''); setStatusFilter('all'); }} style={{
-                      padding: '7px 16px', borderRadius: 8, border: '1px solid #e2e8f0',
-                      background: '#fff', fontSize: 13, fontWeight: 600, color: '#3b82f6', cursor: 'pointer',
-                    }}>Clear filters</button>
+                    <button onClick={() => { setSearch(''); setStatusFilter('all'); }} style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 13, fontWeight: 600, color: '#3b82f6', cursor: 'pointer' }}>Clear filters</button>
                   </td>
                 </tr>
               ) : (
@@ -393,17 +455,12 @@ export default function MachinesPage() {
                     onMouseEnter={e => e.currentTarget.style.background = '#fafbff'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    {/* # */}
                     <td style={{ ...TD, color: '#cbd5e1', fontWeight: 600, fontSize: 12 }}>{idx + 1}</td>
 
-                    {/* Machine name */}
                     <td style={TD}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
-                          <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                            <rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/>
-                            <rect x="2" y="17" width="20" height="4" rx="1"/>
-                          </svg>
+                          <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>
                         </div>
                         <div>
                           <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13, marginBottom: 1 }}>{m.name}</div>
@@ -412,90 +469,46 @@ export default function MachinesPage() {
                       </div>
                     </td>
 
-                    {/* Type */}
                     <td style={{ ...TD, color: '#475569' }}>
-                      <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '3px 8px', fontSize: 12, fontWeight: 500 }}>
-                        {m.machine_type}
-                      </span>
+                      <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '3px 8px', fontSize: 12, fontWeight: 500 }}>{m.machine_type}</span>
                     </td>
 
-                    {/* Location */}
                     <td style={{ ...TD, color: '#64748b' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <svg width="12" height="12" fill="none" stroke="#94a3b8" strokeWidth="2" viewBox="0 0 24 24">
-                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                          <circle cx="12" cy="10" r="3"/>
-                        </svg>
+                        <svg width="12" height="12" fill="none" stroke="#94a3b8" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                         {m.location}
                       </div>
                     </td>
 
-                    {/* Status */}
                     <td style={TD}><StatusBadge status={m.status} /></td>
 
-                    {/* Last serviced */}
                     <td style={{ ...TD, color: '#64748b' }}>
                       {m.last_serviced ? (
                         <div>
-                          <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {new Date(m.last_serviced).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </div>
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
-                            {Math.floor((Date.now() - new Date(m.last_serviced)) / 86400000)} days ago
-                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{new Date(m.last_serviced).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>{Math.floor((Date.now() - new Date(m.last_serviced)) / 86400000)} days ago</div>
                         </div>
-                      ) : (
-                        <span style={{ color: '#cbd5e1', fontSize: 12 }}>Never serviced</span>
-                      )}
+                      ) : <span style={{ color: '#cbd5e1', fontSize: 12 }}>Never serviced</span>}
                     </td>
 
-                    {/* Actions: View + Delete */}
                     <td style={{ ...TD, textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <Link to={`/machine/${m.id}`}>
-                          <button style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 5,
-                            padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
-                            border: '1px solid #e2e8f0', background: '#fff',
-                            fontSize: 12, fontWeight: 600, color: '#0f172a',
-                            transition: 'all 0.12s',
-                          }}
+                          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#0f172a', transition: 'all 0.12s' }}
                             onMouseEnter={e => { e.currentTarget.style.background = '#0f172a'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#0f172a'; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#0f172a'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
-                          >
+                            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#0f172a'; e.currentTarget.style.borderColor = '#e2e8f0'; }}>
                             View
-                            <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                              <polyline points="9 18 15 12 9 6"/>
-                            </svg>
+                            <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                           </button>
                         </Link>
 
-                        <button
-                          onClick={() => handleDelete(m.id, m.name)}
-                          disabled={deletingId === m.id}
-                          title={`Delete ${m.name}`}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 30, height: 30, borderRadius: 8,
-                            border: '1px solid #fecaca', background: '#fff',
-                            color: '#ef4444', cursor: deletingId === m.id ? 'not-allowed' : 'pointer',
-                            transition: 'all 0.12s', flexShrink: 0,
-                          }}
+                        <button onClick={() => setDeleteModal(m)} disabled={deletingId === m.id} title={`Delete ${m.name}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, border: '1px solid #fecaca', background: '#fff', color: '#ef4444', cursor: deletingId === m.id ? 'not-allowed' : 'pointer', transition: 'all 0.12s', flexShrink: 0 }}
                           onMouseEnter={e => { if (deletingId !== m.id) { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#ef4444'; } }}
-                          onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#fecaca'; }}
-                        >
-                          {deletingId === m.id ? (
-                            <svg className="spin" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                              <circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/>
-                            </svg>
-                          ) : (
-                            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                              <polyline points="3 6 5 6 21 6"/>
-                              <path d="M19 6l-1 14H6L5 6"/>
-                              <path d="M10 11v6"/><path d="M14 11v6"/>
-                              <path d="M9 6V4h6v2"/>
-                            </svg>
-                          )}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#fecaca'; }}>
+                          {deletingId === m.id
+                            ? <svg className="spin" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>
+                            : <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>}
                         </button>
                       </div>
                     </td>
@@ -506,12 +519,9 @@ export default function MachinesPage() {
           </table>
         </div>
 
-        {/* Footer */}
         {!loading && processed.length > 0 && (
           <div style={{ padding: '12px 20px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>
-              Showing {processed.length} of {counts.total} machines
-            </div>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>Showing {processed.length} of {counts.total} machines</div>
             <div style={{ display: 'flex', gap: 6, fontSize: 12, color: '#64748b', alignItems: 'center' }}>
               <span>Sort:</span>
               {[
@@ -519,16 +529,135 @@ export default function MachinesPage() {
                 { label: 'Healthy first',  col: 'status', dir: 'asc'  },
               ].map(({ label, col, dir }) => (
                 <button key={label} onClick={() => { setSortCol(col); setSortDir(dir); }} style={{
-                  padding: '3px 10px', borderRadius: 6, border: '1px solid #e2e8f0', cursor: 'pointer', fontWeight: 500,
+                  padding: '3px 10px', borderRadius: 6, border: '1px solid #e2e8f0', cursor: 'pointer', fontWeight: 500, fontSize: 12, transition: 'all 0.12s',
                   background: sortCol === col && sortDir === dir ? '#0f172a' : '#fff',
                   color: sortCol === col && sortDir === dir ? '#fff' : '#64748b',
-                  fontSize: 12, transition: 'all 0.12s',
                 }}>{label}</button>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      {/* ── Recently Deleted section ──────────────────────────── */}
+      {deletedList.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <svg width="15" height="15" fill="none" stroke="#94a3b8" strokeWidth="2" viewBox="0 0 24 24">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#64748b' }}>
+              Recently Deleted ({deletedList.length})
+            </span>
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>— machines can be restored or permanently removed</span>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={TH}>Machine</th>
+                    <th style={TH}>Type</th>
+                    <th style={TH}>Location</th>
+                    <th style={TH}>Last Prediction</th>
+                    <th style={TH}>Deleted</th>
+                    <th style={{ ...TH, textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deletedList.map(entry => {
+                    const p = entry.prediction;
+                    const isRestoring = restoringId === entry.id;
+                    const isPermDeleting = permDeletingId === entry.id;
+                    const deletedAgo = entry.deleted_at
+                      ? Math.floor((Date.now() - new Date(entry.deleted_at)) / 60000)
+                      : null;
+
+                    return (
+                      <tr key={entry.id}
+                        style={{ transition: 'background 0.12s', background: '#fffbf5' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#fff7ed'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#fffbf5'}
+                      >
+                        <td style={TD}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706', flexShrink: 0 }}>
+                              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: '#78350f' }}>{entry.name}</div>
+                              <div style={{ fontSize: 11, color: '#94a3b8' }}>ID #{entry.id}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td style={{ ...TD, color: '#92400e' }}>
+                          <span style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, padding: '2px 8px', fontSize: 12 }}>{entry.machine_type}</span>
+                        </td>
+
+                        <td style={{ ...TD, color: '#92400e', fontSize: 12 }}>{entry.location}</td>
+
+                        <td style={TD}>
+                          {p?.days_until_service != null ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 16, fontWeight: 800, color: '#d97706' }}>{Math.round(p.days_until_service)}</span>
+                              <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>days</span>
+                              {p.status && <StatusBadge status={p.status} />}
+                            </div>
+                          ) : <span style={{ color: '#cbd5e1', fontSize: 12 }}>No prediction saved</span>}
+                        </td>
+
+                        <td style={{ ...TD, color: '#92400e', fontSize: 12 }}>
+                          {deletedAgo !== null
+                            ? deletedAgo < 1 ? 'Just now'
+                              : deletedAgo < 60 ? `${deletedAgo}m ago`
+                              : deletedAgo < 1440 ? `${Math.floor(deletedAgo / 60)}h ago`
+                              : `${Math.floor(deletedAgo / 1440)}d ago`
+                            : '—'}
+                        </td>
+
+                        <td style={{ ...TD, textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {/* Restore */}
+                            <button onClick={() => handleRestore(entry)} disabled={isRestoring || isPermDeleting} style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8,
+                              border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#16a34a',
+                              fontSize: 12, fontWeight: 600, cursor: isRestoring ? 'not-allowed' : 'pointer', transition: 'all 0.12s',
+                            }}
+                              onMouseEnter={e => { if (!isRestoring) { e.currentTarget.style.background = '#16a34a'; e.currentTarget.style.color = '#fff'; } }}
+                              onMouseLeave={e => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.color = '#16a34a'; }}>
+                              {isRestoring
+                                ? <svg className="spin" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>
+                                : <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>}
+                              Restore
+                            </button>
+
+                            {/* Permanent delete */}
+                            <button onClick={() => handlePermanentDelete(entry)} disabled={isRestoring || isPermDeleting} style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8,
+                              border: '1px solid #e2e8f0', background: '#fff', color: '#64748b',
+                              fontSize: 12, fontWeight: 600, cursor: isPermDeleting ? 'not-allowed' : 'pointer', transition: 'all 0.12s',
+                            }}
+                              onMouseEnter={e => { if (!isPermDeleting) { e.currentTarget.style.background = '#0f172a'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#0f172a'; } }}
+                              onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#64748b'; e.currentTarget.style.borderColor = '#e2e8f0'; }}>
+                              {isPermDeleting
+                                ? <svg className="spin" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10"/></svg>
+                                : <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>}
+                              Delete Forever
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

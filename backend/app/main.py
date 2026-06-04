@@ -3,6 +3,7 @@ import time
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.database import engine, Base
 from app.api import machines, logs, predictions, ai_insights
 
@@ -31,6 +32,17 @@ def startup():
     for attempt in range(12):
         try:
             Base.metadata.create_all(bind=engine)
+            # Add soft-delete columns to existing databases that pre-date the migration
+            with engine.connect() as conn:
+                for stmt in [
+                    "ALTER TABLE machines ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0",
+                    "ALTER TABLE machines ADD COLUMN deleted_at DATETIME",
+                ]:
+                    try:
+                        conn.execute(text(stmt))
+                        conn.commit()
+                    except Exception:
+                        pass  # Column already exists — safe to ignore
             logger.info('Database tables created/verified successfully')
             return
         except Exception as e:

@@ -6,8 +6,11 @@ from sklearn.pipeline import Pipeline
 import joblib
 import os
 
-MODEL_PATH = 'app/ml/model.pkl'
-ANOMALY_PATH = 'app/ml/anomaly_model.pkl'
+# Absolute paths — always resolve relative to this file's directory
+# so the model persists regardless of the server's working directory.
+_ML_DIR   = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH  = os.path.join(_ML_DIR, 'model.pkl')
+ANOMALY_PATH = os.path.join(_ML_DIR, 'anomaly_model.pkl')
 
 
 def train_model(data: list[dict]):

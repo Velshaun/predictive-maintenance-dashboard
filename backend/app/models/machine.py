@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -14,6 +14,9 @@ class Machine(Base):
     status = Column(String, default='green')  # green, yellow, red
     last_serviced = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Soft-delete support
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     logs = relationship('MaintenanceLog', back_populates='machine')
     readings = relationship('SensorReading', back_populates='machine')
