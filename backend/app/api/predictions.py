@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.machine import Machine, SensorReading
@@ -125,11 +125,22 @@ def run_prediction(machine_id: int, db: Session = Depends(get_db)):
 
 # ── Wildcard GET — must come AFTER specific paths ────────────────────────────
 @router.get('/{machine_id}')
-def get_machine_readings(machine_id: int, db: Session = Depends(get_db)):
+def get_machine_readings(
+    machine_id: int,
+    limit: int = Query(default=None, ge=1, le=100_000, description='Cap the number of readings returned (newest first)'),
+    db: Session = Depends(get_db),
+):
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
-    return db.query(SensorReading).filter(SensorReading.machine_id == machine_id).all()
+    q = (
+        db.query(SensorReading)
+        .filter(SensorReading.machine_id == machine_id)
+        .order_by(SensorReading.recorded_at.desc())
+    )
+    if limit:
+        q = q.limit(limit)
+    return q.all()
 
 
 # ── Write a new sensor reading (rule-based status update) ────────────────────

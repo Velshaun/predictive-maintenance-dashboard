@@ -26,11 +26,11 @@ class MaintenanceLog(Base):
     __tablename__ = 'maintenance_logs'
 
     id = Column(Integer, primary_key=True, index=True)
-    machine_id = Column(Integer, ForeignKey('machines.id'))
+    machine_id = Column(Integer, ForeignKey('machines.id'), index=True)
     description = Column(Text)
     technician = Column(String)
     cost = Column(Float)
-    logged_at = Column(DateTime, default=datetime.utcnow)
+    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     machine = relationship('Machine', back_populates='logs')
 
@@ -39,11 +39,11 @@ class SensorReading(Base):
     __tablename__ = 'sensor_readings'
 
     id = Column(Integer, primary_key=True, index=True)
-    machine_id = Column(Integer, ForeignKey('machines.id'))
+    machine_id = Column(Integer, ForeignKey('machines.id'), index=True)
     temperature = Column(Float)
     vibration = Column(Float)
     pressure = Column(Float)
     runtime_hours = Column(Float)
-    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     machine = relationship('Machine', back_populates='readings')

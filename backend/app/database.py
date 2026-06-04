@@ -16,10 +16,19 @@ if not DATABASE_URL:
 
 _is_sqlite = DATABASE_URL.startswith('sqlite')
 
-_engine_kwargs = {'pool_pre_ping': True}
+_engine_kwargs: dict = {'pool_pre_ping': True}
 if _is_sqlite:
     # SQLite requires check_same_thread=False when used with FastAPI
     _engine_kwargs['connect_args'] = {'check_same_thread': False}
+else:
+    # PostgreSQL: maintain a warm connection pool so queries don't pay a
+    # TCP-handshake penalty on every request.
+    _engine_kwargs.update({
+        'pool_size':     10,   # keep up to 10 idle connections ready
+        'max_overflow':  20,   # allow up to 20 extra under burst load
+        'pool_timeout':  30,   # wait at most 30 s for a free connection
+        'pool_recycle':  300,  # recycle connections every 5 min (avoids stale sockets)
+    })
 
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 

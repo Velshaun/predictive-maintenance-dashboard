@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import engine, Base, SessionLocal
-from app.api import machines, logs, predictions, ai_insights
+from app.api import machines, logs, predictions, ai_insights, dashboard
 from app.api.predictions import auto_train_from_db
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ app.include_router(machines.router, prefix='/api/machines', tags=['machines'])
 app.include_router(logs.router, prefix='/api/logs', tags=['logs'])
 app.include_router(predictions.router, prefix='/api/predictions', tags=['predictions'])
 app.include_router(ai_insights.router, prefix='/api/ai', tags=['ai'])
+app.include_router(dashboard.router, prefix='/api/dashboard', tags=['dashboard'])
 
 
 @app.on_event('startup')
