@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts';
-import { getMachines, getMachineStatus, predict, trainModel } from '../utils/api';
+import { getMachines, runPrediction, trainModel } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
 
@@ -23,8 +23,6 @@ const barColor = (days) => {
   if (days <= 30)  return '#eab308';
   return '#22c55e';
 };
-
-const FALLBACK_READING = { temperature: 70.0, vibration: 3.0, pressure: 85.0, runtime_hours: 200.0 };
 
 /* ── Sub-components ──────────────────────────────────────────────────── */
 const AnomalyPill = ({ score }) => {
@@ -113,39 +111,25 @@ export default function PredictionsPage() {
     }
 
     // ── Step 2: sequential predict for every machine ─────────────────
+    // Uses POST /api/predictions/run/{id} — reads latest stored sensor
+    // reading from the DB and returns ML output. No extra DB writes.
     const results = {};
     let successCount = 0;
 
     for (let i = 0; i < machines.length; i++) {
       const m = machines[i];
       try {
-        let reading = FALLBACK_READING;
-        try {
-          const statusRes = await getMachineStatus(m.id);
-          const lr = statusRes.data?.latest_reading;
-          if (lr) {
-            reading = {
-              temperature:   lr.temperature,
-              vibration:     lr.vibration,
-              pressure:      lr.pressure,
-              runtime_hours: lr.runtime_hours,
-            };
-          }
-        } catch (statusErr) {
-          console.warn(`[predictions] could not fetch reading for machine ${m.id}, using fallback`);
-        }
-
-        // Await each machine individually — never move on until this resolves
-        const predRes = await predict({ machine_id: m.id, ...reading });
+        // One call per machine — await before moving to the next
+        const predRes = await runPrediction(m.id);
         results[m.id] = predRes.data;
         successCount++;
       } catch (predErr) {
-        // Log and continue — do NOT stop the loop
+        // Log and continue — never stop the loop for a single failure
         console.error(`[predictions] machine ${m.id} failed:`, predErr?.message);
         results[m.id] = { error: predErr?.response?.data?.detail || 'Prediction failed' };
       }
 
-      // Incrementally update UI so chart/table fill in one row at a time
+      // Incrementally update state so chart/table fill in one row at a time
       setPredictions(prev => ({ ...prev, [m.id]: results[m.id] }));
       setProgress(i + 1);
     }

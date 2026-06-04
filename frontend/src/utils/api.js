@@ -10,14 +10,17 @@ export const api = axios.create({
   baseURL: API_BASE,
 });
 
-export const getMachines = () => api.get('/api/machines/');
-export const getMachine = (id) => api.get(`/api/machines/${id}`);
-export const createMachine = (data) => api.post('/api/machines/', data);
-export const getMachineLogs = (id) => api.get(`/api/machines/${id}/logs`);
-export const addLog = (data) => api.post('/api/machines/logs', data);
-export const predict = (data) => api.post('/api/predictions/predict', data);
-export const getMachineStatus   = (id)  => api.get(`/api/predictions/status/${id}`);
-export const getMachineReadings = (id)  => api.get(`/api/predictions/${id}`);
-export const trainModel         = ()    => api.post('/api/predictions/train');
-export const getAllLogs          = ()    => api.get('/api/logs/');
+export const getMachines        = ()     => api.get('/api/machines/');
+export const getMachine         = (id)   => api.get(`/api/machines/${id}`);
+export const createMachine      = (data) => api.post('/api/machines/', data);
+export const deleteMachine      = (id)   => api.delete(`/api/machines/${id}`);
+export const getMachineLogs     = (id)   => api.get(`/api/machines/${id}/logs`);
+export const addLog             = (data) => api.post('/api/machines/logs', data);
+// Prediction endpoints
+export const runPrediction      = (machineId) => api.post(`/api/predictions/run/${machineId}`);
+export const predict            = (data) => api.post('/api/predictions/predict', data);
+export const getMachineStatus   = (id)   => api.get(`/api/predictions/status/${id}`);
+export const getMachineReadings = (id)   => api.get(`/api/predictions/${id}`);
+export const trainModel         = ()     => api.post('/api/predictions/train');
+export const getAllLogs          = ()     => api.get('/api/logs/');
 export const getAIInsight       = (data) => api.post('/api/ai/insight', data);
