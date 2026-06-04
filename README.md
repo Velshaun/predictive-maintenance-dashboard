@@ -226,7 +226,42 @@ Create a `.env` file at the project root (or set these in your deployment enviro
 
 ---
 
-## Kubernetes Deployment
+## Deployment
+
+### Railway (Backend — Recommended for quick deployment)
+
+The backend is pre-configured for [Railway](https://railway.app) with `backend/railway.json`, `backend/Procfile`, and a `$PORT`-aware Dockerfile. Railway auto-detects the Dockerfile and injects all runtime environment variables.
+
+#### Steps
+
+1. **Create a new Railway project** at [railway.app](https://railway.app) and connect your GitHub repository.
+
+2. **Set the root directory** to `backend` in the Railway service settings so it builds from `backend/Dockerfile`.
+
+3. **Add a PostgreSQL plugin** — Railway provisions a managed Postgres instance and automatically injects `DATABASE_URL` into your service.
+
+4. **Add environment variables** in the Railway service → *Variables* tab (use `backend/.env.example` as a reference):
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | Auto-injected by Railway PostgreSQL plugin |
+   | `ANTHROPIC_API_KEY` | Your Anthropic Claude API key |
+   | `SECRET_KEY` | Run `python -c "import secrets; print(secrets.token_hex(32))"` |
+   | `ENVIRONMENT` | `production` |
+   | `ALLOWED_ORIGINS` | Your Vercel deployment URL, e.g. `https://your-app.vercel.app` |
+
+5. **Deploy** — Railway deploys automatically on every push to `main`. The start command from `railway.json` is used:
+   ```
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+6. **Update the Vercel proxy** — once Railway assigns your service URL (e.g. `https://your-app.up.railway.app`), update `BACKEND_HOST` in `api/[...path].js` to that URL and redeploy Vercel. The frontend will route all `/api/*` calls through the Vercel serverless proxy to Railway with no CORS issues.
+
+   Alternatively, for direct frontend → Railway calls, set `REACT_APP_API_URL` in `.env.production` to your Railway URL (see Option B comments in that file) and set `ALLOWED_ORIGINS` on the Railway service to your Vercel URL.
+
+---
+
+### Kubernetes Deployment (AWS EKS)
 
 Kubernetes manifests live in `infrastructure/kubernetes/`:
 
@@ -278,4 +313,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-<p align="center">Built with intent by <strong>Velshaun</strong> · MaintainIQ Platform © 2026</p>
+<p align="center">Built with intent by <strong>Vel Byers</strong> · MaintainIQ Platform © 2026</p>

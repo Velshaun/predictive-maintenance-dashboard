@@ -12,7 +12,12 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title='Predictive Maintenance API', version='1.0.0')
 
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+# ALLOWED_ORIGINS accepts a comma-separated list of origins.
+# Defaults to '*' (all) so local dev and Railway preview URLs work without
+# configuration.  In production set this env var to your exact Vercel URL:
+#   ALLOWED_ORIGINS=https://your-app.vercel.app
+_raw_origins = os.getenv('ALLOWED_ORIGINS', '*')
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(',') if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
