@@ -40,6 +40,7 @@ const COST_PALETTE = [
    Data helpers
    ───────────────────────────────────────────────────────────── */
 function getTop3Critical(machines) {
+  if (!Array.isArray(machines)) return [];
   return [...machines]
     .sort((a, b) => (STATUS_PRIORITY[a.status] ?? 3) - (STATUS_PRIORITY[b.status] ?? 3))
     .slice(0, 3);
@@ -50,13 +51,15 @@ function getTop3Critical(machines) {
  * Downsamples to every 3rd reading (60 → ~20 pts) for display clarity.
  */
 function buildTrendData(top3, readingsArrays) {
-  if (!top3.length || !readingsArrays.length) return [];
+  if (!Array.isArray(top3) || !top3.length) return [];
+  if (!Array.isArray(readingsArrays) || !readingsArrays.length) return [];
 
-  const sampled = readingsArrays.map(arr =>
-    [...arr]
+  const sampled = readingsArrays.map(arr => {
+    if (!Array.isArray(arr)) return [];
+    return [...arr]
       .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at))
-      .filter((_, i) => i % 3 === 0),
-  );
+      .filter((_, i) => i % 3 === 0);
+  });
 
   const base = sampled[0] ?? [];
   return base.map((r, idx) => {
@@ -78,6 +81,7 @@ function buildTrendData(top3, readingsArrays) {
  * Returns top-8 sorted by spend descending.
  */
 function buildCostData(machines, logs) {
+  if (!Array.isArray(machines) || !Array.isArray(logs)) return [];
   const nameMap = Object.fromEntries(machines.map(m => [m.id, m.name]));
   const totals  = {};
   logs.forEach(log => {
@@ -550,8 +554,10 @@ export default function Dashboard() {
         return Promise.all(top3Local.map(m => getMachineReadings(m.id)));
       })
       .then(responses => {
-        if (!responses?.length) return;
-        const readingsArrays = responses.map(r => r?.data || []);
+        if (!Array.isArray(responses) || !responses.length) return;
+        const readingsArrays = responses.map(r =>
+          Array.isArray(r?.data) ? r.data : [],
+        );
         setSensorData(buildTrendData(top3Local, readingsArrays));
         setChartsLoading(false);
       })
@@ -580,9 +586,9 @@ export default function Dashboard() {
       const matchStatus = filter === 'all' || m.status === filter;
       const q = search.toLowerCase();
       const matchSearch = !q
-        || m.name.toLowerCase().includes(q)
-        || m.machine_type.toLowerCase().includes(q)
-        || m.location.toLowerCase().includes(q);
+        || (m.name         ?? '').toLowerCase().includes(q)
+        || (m.machine_type ?? '').toLowerCase().includes(q)
+        || (m.location     ?? '').toLowerCase().includes(q);
       return matchStatus && matchSearch;
     });
   }, [machines, filter, search]);
