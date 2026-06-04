@@ -419,11 +419,11 @@ export default function SettingsPage() {
 
   /* ══════════════════════════════════════════════════════════ */
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 800 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 800 }}>
 
       {/* ── Page header ── */}
       <div style={{ marginBottom: 28 }}>
-        <div style={{
+        <div className="settings-header-row" style={{
           display: 'flex', alignItems: 'flex-start',
           justifyContent: 'space-between', marginBottom: 14,
         }}>
@@ -685,7 +685,7 @@ export default function SettingsPage() {
           }}>
             Current threshold preview
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div className="threshold-preview-row" style={{ display: 'flex', gap: 10 }}>
             {[
               {
                 tag: 'Critical',

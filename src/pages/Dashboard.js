@@ -622,10 +622,10 @@ export default function Dashboard() {
 
   /* ══════════════════════════════════════════════════════════ */
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
       {/* ── KPI Cards ── */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 28 }}>
+      <div className="stat-cards-row" style={{ display: 'flex', gap: 14, marginBottom: 28 }}>
         {loading ? [1,2,3,4].map(i => <StatCardSkeleton key={i} />) : (
           <>
             <StatCard
@@ -666,7 +666,7 @@ export default function Dashboard() {
         </div>
 
         {/* Row 1: Sensor trend (wider) + Status donut (narrower) */}
-        <div style={{
+        <div className="charts-grid-row" style={{
           display: 'grid',
           gridTemplateColumns: '3fr 2fr',
           gap: 14,
@@ -682,7 +682,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Machine grid section ── */}
-      <div style={{
+      <div className="dashboard-toolbar" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 16, gap: 12, flexWrap: 'wrap',
       }}>
@@ -694,20 +694,20 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Search */}
           <div style={{ position: 'relative' }}>
             <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }}
               width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input
+          <input
               type="text"
               placeholder="Search machines…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{
-                paddingLeft: 32, paddingRight: 12, height: 36,
+                paddingLeft: 32, paddingRight: 12, height: 44,
                 border: '1px solid #e2e8f0', borderRadius: 8,
                 fontSize: 13, color: '#0f172a', background: '#fff',
                 outline: 'none', width: 200,
@@ -740,7 +740,7 @@ export default function Dashboard() {
               value={filter}
               onChange={e => setFilter(e.target.value)}
               style={{
-                paddingLeft: 30, paddingRight: 28, height: 36,
+                paddingLeft: 30, paddingRight: 28, height: 44,
                 border: '1px solid #e2e8f0', borderRadius: 8,
                 fontSize: 13, color: '#0f172a', background: '#fff',
                 outline: 'none', cursor: 'pointer', appearance: 'none',
@@ -763,7 +763,7 @@ export default function Dashboard() {
 
       {/* ── Machine grid ── */}
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+        <div className="machine-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
           {[1,2,3,4,5,6].map(i => <MachineCardSkeleton key={i} />)}
         </div>
       ) : filtered.length === 0 ? (
@@ -812,7 +812,7 @@ export default function Dashboard() {
           )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+        <div className="machine-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
           {filtered.map(m => (
             <Link to={`/machine/${m.id}`} key={m.id} style={{ textDecoration: 'none' }}>
               <div className="machine-card">

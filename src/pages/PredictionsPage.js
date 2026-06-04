@@ -273,10 +273,10 @@ export default function PredictionsPage() {
 
   /* ══════════════════════════════════════════════════════════════════ */
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
       {/* ── Action bar ───────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 28, flexWrap: 'wrap' }}>
+      <div className="predictions-action-bar" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 28, flexWrap: 'wrap' }}>
         <div>
           <button onClick={handleRunAll} disabled={btnDisabled} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -327,7 +327,7 @@ export default function PredictionsPage() {
               {hasPredictions ? 'Live countdown from predicted service dates · updates every minute' : 'Run predictions to populate this chart'}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 14, fontSize: 11, fontWeight: 600 }}>
+          <div className="chart-legend-row" style={{ display: 'flex', gap: 14, fontSize: 11, fontWeight: 600 }}>
             {[['#ef4444','#fef2f2','≤ 7d / Overdue'],['#eab308','#fefce8','8–30d (Soon)'],['#22c55e','#f0fdf4','> 30d (OK)']].map(([color, bg, label]) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, background: bg, borderRadius: 6, padding: '4px 8px' }}>
                 <div style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
@@ -373,7 +373,7 @@ export default function PredictionsPage() {
             <span style={{ fontSize: 11, color: '#94a3b8' }}>Live countdown · updates every minute</span>
           )}
         </div>
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-scroll-wrapper">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>

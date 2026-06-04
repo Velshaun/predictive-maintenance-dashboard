@@ -363,7 +363,7 @@ export default function MachinesPage() {
   };
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 1280 }}>
 
       {/* ── Delete confirmation modal ────────────────────────── */}
       {deleteModal && (
@@ -414,7 +414,7 @@ export default function MachinesPage() {
       )}
 
       {/* ── Top bar ──────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="machines-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {!loading && [
             { label: 'All',          val: 'all',    count: counts.total,  color: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe' },
@@ -441,9 +441,9 @@ export default function MachinesPage() {
               width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" placeholder="Search name, type, location…"
+          <input type="text" placeholder="Search name, type, location…"
               value={search} onChange={e => setSearch(e.target.value)}
-              style={{ ...inputStyle, paddingLeft: 32, paddingRight: search ? 30 : 12, width: 240, height: 36 }}
+              style={{ ...inputStyle, paddingLeft: 32, paddingRight: search ? 30 : 12, width: 240, height: 44 }}
               onFocus={e => e.target.style.borderColor = '#3b82f6'}
               onBlur={e => e.target.style.borderColor = '#e2e8f0'}
             />
@@ -455,7 +455,7 @@ export default function MachinesPage() {
           </div>
 
           <button onClick={() => { setShowAddForm(v => !v); setAddError(null); }} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 9, border: 'none', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 9, border: 'none', cursor: 'pointer',
             background: showAddForm ? '#f1f5f9' : 'linear-gradient(135deg,#2563eb,#3b82f6)',
             color: showAddForm ? '#475569' : '#fff', fontWeight: 600, fontSize: 13,
             boxShadow: showAddForm ? 'none' : '0 4px 10px rgba(59,130,246,0.30)', transition: 'all 0.15s',
@@ -473,7 +473,7 @@ export default function MachinesPage() {
         <div className="fade-slide-up" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 24px', marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>New Machine</div>
           <form onSubmit={handleAdd}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div className="add-machine-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
               {[
                 { key: 'name',         label: 'Machine Name', placeholder: 'e.g. Compressor Unit 4' },
                 { key: 'machine_type', label: 'Machine Type', placeholder: 'e.g. Compressor' },
@@ -527,7 +527,7 @@ export default function MachinesPage() {
           )}
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-scroll-wrapper">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -763,11 +763,11 @@ export default function MachinesPage() {
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={TH}>Machine</th>
+          <div className="table-scroll-wrapper">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={TH}>Machine</th>
                     <th style={TH}>Type</th>
                     <th style={TH}>Location</th>
                     <th style={TH}>Last Prediction</th>

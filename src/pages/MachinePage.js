@@ -85,7 +85,7 @@ export default function MachinePage() {
   };
 
   if (!machine) return (
-    <div style={{ padding: '28px 32px', maxWidth: 960 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 960 }}>
       {/* Breadcrumb skeleton */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
         <Sk w={70} h={12} r={6} />
@@ -116,7 +116,7 @@ export default function MachinePage() {
   );
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 960 }}>
+    <div className="page-content" style={{ padding: '28px 32px', maxWidth: 960 }}>
 
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 20, fontSize: 13 }}>
@@ -131,7 +131,7 @@ export default function MachinePage() {
         padding: '24px 28px', marginBottom: 20,
         boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="machine-header-inner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{
               width: 54, height: 54, borderRadius: 14,
@@ -159,7 +159,7 @@ export default function MachinePage() {
         </div>
 
         {/* Metadata strip */}
-        <div style={{ display: 'flex', gap: 0, marginTop: 22, paddingTop: 20, borderTop: '1px solid #f1f5f9' }}>
+        <div className="machine-meta-strip" style={{ display: 'flex', gap: 0, marginTop: 22, paddingTop: 20, borderTop: '1px solid #f1f5f9' }}>
           {[
             { label: 'Asset ID', value: `#${machine.id}` },
             { label: 'Type', value: machine.machine_type },
@@ -196,7 +196,7 @@ export default function MachinePage() {
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '24px 28px', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Current Sensor Readings</div>
             <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 20 }}>Live metrics from the last 24-hour cycle</div>
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="metric-cards-row" style={{ display: 'flex', gap: 12 }}>
               <MetricCard label="Temperature" value="73" unit="°C" color="#ef4444" subtitle="↑ 2° from baseline"
                 icon={<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>}
               />
@@ -340,7 +340,7 @@ export default function MachinePage() {
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Prediction Result</div>
                   <StatusBadge status={prediction.status} />
                 </div>
-                <div style={{ display: 'flex', gap: 16 }}>
+                <div className="prediction-result-row" style={{ display: 'flex', gap: 16 }}>
 
                   {/* Days until service */}
                   <div style={{ flex: 1, background: 'linear-gradient(135deg, #f0f9ff, #eff6ff)', border: '1px solid #dbeafe', borderRadius: 14, padding: '22px 24px' }}>
