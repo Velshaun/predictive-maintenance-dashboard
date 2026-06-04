@@ -8,6 +8,43 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+# ── Shared label + auto-train helper (used by startup and the /train endpoint) ──
+def _label(r) -> float:
+    """Derive a positive days_until_service label from sensor thresholds."""
+    t, v, p = r.temperature, r.vibration, r.pressure
+    if t > 90 or v > 8 or p > 120:
+        penalty = max(t - 90, 0) * 0.5 + max(v - 8, 0) * 2 + max(p - 120, 0) * 0.1
+        return float(max(3, 14 - int(penalty)))
+    elif t > 75 or v > 5 or p > 100:
+        penalty = max(t - 75, 0) * 0.8 + max(v - 5, 0) * 2 + max(p - 100, 0) * 0.1
+        return float(max(15, 30 - int(penalty)))
+    else:
+        stress = (t - 60) * 0.4 + v * 1.5 + (p - 70) * 0.2
+        return float(min(90, max(31, int(90 - stress))))
+
+
+def auto_train_from_db(db) -> dict | None:
+    """
+    Train the ML model using all sensor readings currently in the database.
+    Called on pod startup so every replica boots with a trained model.
+    Returns the train_model result dict, or None if there aren't enough readings.
+    """
+    readings = db.query(SensorReading).all()
+    if len(readings) < 20:
+        return None
+    data = [
+        {
+            'temperature':      r.temperature,
+            'vibration':        r.vibration,
+            'pressure':         r.pressure,
+            'runtime_hours':    r.runtime_hours,
+            'days_until_service': _label(r),
+        }
+        for r in readings
+    ]
+    return train_model(data)
+
+
 class SensorReadingCreate(BaseModel):
     machine_id: int
     temperature: float
@@ -149,33 +186,8 @@ def trigger_training(db: Session = Depends(get_db)):
     Train the RandomForest model on all stored sensor readings.
     Requires at least 20 readings.
     """
-    readings = db.query(SensorReading).all()
-
-    if len(readings) < 20:
-        return {'error': 'Need at least 20 readings to train', 'current': len(readings)}
-
-    def _label(r) -> float:
-        """Derive a positive days_until_service label from sensor thresholds."""
-        t, v, p = r.temperature, r.vibration, r.pressure
-        if t > 90 or v > 8 or p > 120:
-            penalty = max(t - 90, 0) * 0.5 + max(v - 8, 0) * 2 + max(p - 120, 0) * 0.1
-            return float(max(3, 14 - int(penalty)))
-        elif t > 75 or v > 5 or p > 100:
-            penalty = max(t - 75, 0) * 0.8 + max(v - 5, 0) * 2 + max(p - 100, 0) * 0.1
-            return float(max(15, 30 - int(penalty)))
-        else:
-            stress = (t - 60) * 0.4 + v * 1.5 + (p - 70) * 0.2
-            return float(min(90, max(31, int(90 - stress))))
-
-    data = [
-        {
-            'temperature': r.temperature,
-            'vibration': r.vibration,
-            'pressure': r.pressure,
-            'runtime_hours': r.runtime_hours,
-            'days_until_service': _label(r),
-        }
-        for r in readings
-    ]
-
-    return train_model(data)
+    result = auto_train_from_db(db)
+    if result is None:
+        count = db.query(SensorReading).count()
+        return {'error': 'Need at least 20 readings to train', 'current': count}
+    return result

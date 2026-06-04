@@ -4,8 +4,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
 from app.api import machines, logs, predictions, ai_insights
+from app.api.predictions import auto_train_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,20 @@ def startup():
                         conn.commit()
                     except Exception:
                         pass  # Column already exists — safe to ignore
+            # Auto-train ML model so every replica/pod boots with a trained model.
+            # With multiple replicas, only the pod that handles /train saves the pkl;
+            # the others never get it. Training here ensures every pod is self-sufficient.
+            try:
+                db = SessionLocal()
+                result = auto_train_from_db(db)
+                db.close()
+                if result:
+                    logger.info(f'ML model auto-trained on startup: {result}')
+                else:
+                    logger.info('ML auto-train skipped: not enough sensor readings yet')
+            except Exception as train_err:
+                logger.warning(f'ML auto-train on startup failed (non-fatal): {train_err}')
+
             logger.info('Database tables created/verified successfully')
             return
         except Exception as e:

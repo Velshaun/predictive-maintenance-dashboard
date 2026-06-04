@@ -94,9 +94,13 @@ export default function PredictionsPage() {
 
   /* ── Run Predictions (trains silently first, then predicts all) ─────── */
   const handleRunAll = useCallback(async () => {
-    // Re-compute inline so the closure always sees fresh values
+    // Re-compute inline so the closure always sees fresh values.
+    // Must match the allPredicted definition above — model_not_trained (null days) is not "done".
     const _allDone = !loading && machines.length > 0 &&
-      machines.every(m => predictions[m.id] != null && !predictions[m.id]?.error);
+      machines.every(m => {
+        const p = predictions[m.id];
+        return p != null && !p?.error && p?.days_until_service != null;
+      });
     if (_allDone || running || loading) return;
 
     setRunning(true);
@@ -174,8 +178,13 @@ export default function PredictionsPage() {
 
   const hasPredictions = Object.keys(predictions).length > 0;
   // Button is disabled only when ALL current machines already have successful predictions
+  // A machine is only "predicted" if it has a real days_until_service value.
+  // model_not_trained responses (days_until_service = null) keep the button active.
   const allPredicted   = !loading && machines.length > 0 &&
-    machines.every(m => predictions[m.id] != null && !predictions[m.id]?.error);
+    machines.every(m => {
+      const p = predictions[m.id];
+      return p != null && !p?.error && p?.days_until_service != null;
+    });
   const btnDisabled    = running || loading || allPredicted;
 
   /* ══════════════════════════════════════════════════════════════════ */
