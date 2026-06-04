@@ -20,7 +20,11 @@ services:
       - db
 
   frontend:
-    build: ./frontend
+    # Build context is repo root so the Dockerfile can access src/, public/,
+    # package.json, and docker/frontend/nginx.conf from a single context.
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
     ports:
       - '3000:80'
     depends_on:

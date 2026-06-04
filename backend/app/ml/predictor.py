@@ -53,8 +53,10 @@ def predict_days_until_service(temperature, vibration, pressure, runtime_hours):
     
     model = joblib.load(MODEL_PATH)
     X = np.array([[temperature, vibration, pressure, runtime_hours]])
-    # Clamp to [3, 365] — ML output is never negative or unrealistically large
-    prediction = float(max(3.0, min(365.0, model.predict(X)[0])))
+    # Clamp to [7, 90] — minimum 7 days (immediate-attention threshold),
+    # maximum 90 days (freshly serviced baseline).  This ensures every
+    # prediction returned to the UI is a positive, actionable value.
+    prediction = float(max(7.0, min(90.0, model.predict(X)[0])))
     
     # Get anomaly score
     anomaly_model = joblib.load(ANOMALY_PATH)

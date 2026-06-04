@@ -11,14 +11,17 @@ node_modules/
 build/
 dist/
 
+# CRA local environment overrides — never commit these
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
 # Terraform
 .terraform/
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
-
-# Docker
-.dockerignore
 
 # IDE
 .vscode/settings.json
@@ -32,3 +35,11 @@ dist/
 *.db-shm
 *.db-wal
 backend/tests/test_run.db
+
+# Old frontend/ folder — now contains only node_modules/ and build/,
+# which are already covered by the Node rules above. The directory
+# itself is kept for Docker/nginx artifacts in docker/frontend/.
+frontend/node_modules/
+frontend/build/
+frontend/src/
+frontend/public/
