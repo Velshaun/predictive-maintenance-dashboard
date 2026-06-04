@@ -72,7 +72,6 @@ export default function PredictionsPage() {
   const [predictions, setPredictions] = useState({}); // machine_id → result
 
   const [running, setRunning]         = useState(false);
-  const [hasRun, setHasRun]           = useState(false); // button permanently locked
   const [progress, setProgress]       = useState(0);
   const [runError, setRunError]       = useState(null);
 
@@ -88,7 +87,6 @@ export default function PredictionsPage() {
         const { predictions: savedPreds } = JSON.parse(saved);
         if (savedPreds && Object.keys(savedPreds).length > 0) {
           setPredictions(savedPreds);
-          setHasRun(true); // results already exist — keep button disabled
         }
       }
     } catch (_) { /* ignore corrupt storage */ }
@@ -96,10 +94,12 @@ export default function PredictionsPage() {
 
   /* ── Run Predictions (trains silently first, then predicts all) ─────── */
   const handleRunAll = useCallback(async () => {
-    if (hasRun || running || loading) return;
+    // Re-compute inline so the closure always sees fresh values
+    const _allDone = !loading && machines.length > 0 &&
+      machines.every(m => predictions[m.id] != null && !predictions[m.id]?.error);
+    if (_allDone || running || loading) return;
 
     setRunning(true);
-    setHasRun(true);   // disable button immediately — re-enabled only on full failure
     setProgress(0);
     setRunError(null);
 
@@ -137,8 +137,7 @@ export default function PredictionsPage() {
     setRunning(false);
 
     if (successCount === 0) {
-      // Full run failed — re-enable so the user can try again
-      setHasRun(false);
+      // Full run failed — predictions state stays empty so button re-enables automatically
       setRunError('All predictions failed. Check that the backend is reachable and try again.');
       return;
     }
@@ -153,7 +152,7 @@ export default function PredictionsPage() {
 
     // Refresh machine list so current statuses reflect ML output
     getMachines().then(r => setMachines(r.data));
-  }, [machines, hasRun, running, loading]);
+  }, [machines, predictions, running, loading]);
 
   /* ── Shared data source for chart AND table ─────────────────────────
      One row per machine, always 10 rows.  Prediction fields are null
@@ -173,8 +172,11 @@ export default function PredictionsPage() {
     };
   });
 
-  const hasPredictions  = Object.keys(predictions).length > 0;
-  const btnDisabled     = running || loading || hasRun;
+  const hasPredictions = Object.keys(predictions).length > 0;
+  // Button is disabled only when ALL current machines already have successful predictions
+  const allPredicted   = !loading && machines.length > 0 &&
+    machines.every(m => predictions[m.id] != null && !predictions[m.id]?.error);
+  const btnDisabled    = running || loading || allPredicted;
 
   /* ══════════════════════════════════════════════════════════════════ */
   return (
@@ -192,7 +194,7 @@ export default function PredictionsPage() {
               display: 'inline-flex', alignItems: 'center', gap: 8,
               padding: '10px 22px', borderRadius: 10, border: 'none',
               cursor: btnDisabled ? 'not-allowed' : 'pointer',
-              background: hasRun && !running
+              background: allPredicted && !running
                 ? '#f1f5f9'
                 : running
                   ? '#f1f5f9'
@@ -201,7 +203,7 @@ export default function PredictionsPage() {
               fontWeight: 600, fontSize: 14,
               boxShadow: btnDisabled ? 'none' : '0 4px 12px rgba(59,130,246,0.35)',
               transition: 'all 0.15s',
-              opacity: hasRun && !running ? 0.65 : 1,
+              opacity: allPredicted && !running ? 0.65 : 1,
             }}
           >
             {running ? (
@@ -211,7 +213,7 @@ export default function PredictionsPage() {
                 </svg>
                 Predicting {progress}/{machines.length}…
               </>
-            ) : hasRun ? (
+            ) : allPredicted ? (
               <>
                 <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                   <polyline points="20 6 9 17 4 12"/>

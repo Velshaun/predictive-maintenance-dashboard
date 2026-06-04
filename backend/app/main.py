@@ -35,8 +35,8 @@ def startup():
             # Add soft-delete columns to existing databases that pre-date the migration
             with engine.connect() as conn:
                 for stmt in [
-                    "ALTER TABLE machines ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0",
-                    "ALTER TABLE machines ADD COLUMN deleted_at DATETIME",
+                    "ALTER TABLE machines ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT false",
+                    "ALTER TABLE machines ADD COLUMN deleted_at TIMESTAMP",
                 ]:
                     try:
                         conn.execute(text(stmt))
