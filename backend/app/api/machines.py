@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.machine import Machine, MaintenanceLog
+from app.models.machine import Machine, MaintenanceLog, SensorReading
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -42,6 +42,23 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_machine)
     return db_machine
+
+
+@router.delete('/{machine_id}')
+def delete_machine(machine_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a machine and all its associated sensor readings and maintenance logs.
+    """
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail='Machine not found')
+
+    # Delete child records first to avoid FK constraint errors
+    db.query(SensorReading).filter(SensorReading.machine_id == machine_id).delete()
+    db.query(MaintenanceLog).filter(MaintenanceLog.machine_id == machine_id).delete()
+    db.delete(machine)
+    db.commit()
+    return {'message': f'Machine {machine_id} deleted successfully'}
 
 
 @router.get('/{machine_id}/logs')

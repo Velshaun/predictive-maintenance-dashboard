@@ -4,8 +4,6 @@ from app.database import get_db
 from app.models.machine import Machine, SensorReading
 from app.ml.predictor import predict_days_until_service, train_model
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 router = APIRouter()
 
@@ -18,20 +16,86 @@ class SensorReadingCreate(BaseModel):
     runtime_hours: float
 
 
+# ── GET all readings ─────────────────────────────────────────────────────────
 @router.get('/')
 def get_all_readings(db: Session = Depends(get_db)):
     return db.query(SensorReading).all()
 
 
+# ── Specific routes BEFORE the wildcard GET /{machine_id} ────────────────────
+
+@router.get('/status/{machine_id}')
+def get_machine_status(machine_id: int, db: Session = Depends(get_db)):
+    """Return current status and latest sensor reading for a machine."""
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail='Machine not found')
+    latest_reading = (
+        db.query(SensorReading)
+        .filter(SensorReading.machine_id == machine_id)
+        .order_by(SensorReading.recorded_at.desc())
+        .first()
+    )
+    return {
+        'machine_id': machine_id,
+        'machine_name': machine.name,
+        'current_status': machine.status,
+        'latest_reading': latest_reading,
+    }
+
+
+@router.post('/run/{machine_id}')
+def run_prediction(machine_id: int, db: Session = Depends(get_db)):
+    """
+    Run ML prediction for a single machine using its latest stored sensor reading.
+    Does NOT write any new reading — pure prediction call.
+    Falls back to default sensor values when no reading exists.
+    """
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail='Machine not found')
+
+    latest = (
+        db.query(SensorReading)
+        .filter(SensorReading.machine_id == machine_id)
+        .order_by(SensorReading.recorded_at.desc())
+        .first()
+    )
+
+    if latest:
+        t = latest.temperature
+        v = latest.vibration
+        p = latest.pressure
+        r = latest.runtime_hours
+        using_fallback = False
+    else:
+        t, v, p, r = 70.0, 3.0, 85.0, 200.0
+        using_fallback = True
+
+    result = predict_days_until_service(t, v, p, r)
+
+    # Update machine status if model is trained
+    if result['status'] != 'model_not_trained':
+        machine.status = result['status']
+        db.commit()
+
+    return {
+        'machine_id': machine_id,
+        'using_fallback': using_fallback,
+        **result,
+    }
+
+
+# ── Wildcard GET — must come AFTER specific paths ────────────────────────────
 @router.get('/{machine_id}')
 def get_machine_readings(machine_id: int, db: Session = Depends(get_db)):
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
-    readings = db.query(SensorReading).filter(SensorReading.machine_id == machine_id).all()
-    return readings
+    return db.query(SensorReading).filter(SensorReading.machine_id == machine_id).all()
 
 
+# ── Write a new sensor reading (rule-based status update) ────────────────────
 @router.post('/')
 def add_sensor_reading(reading: SensorReadingCreate, db: Session = Depends(get_db)):
     machine = db.query(Machine).filter(Machine.id == reading.machine_id).first()
@@ -41,7 +105,6 @@ def add_sensor_reading(reading: SensorReadingCreate, db: Session = Depends(get_d
     db_reading = SensorReading(**reading.dict())
     db.add(db_reading)
 
-    # Simple rule-based prediction to update machine status
     status = 'green'
     if reading.temperature > 90 or reading.vibration > 8 or reading.pressure > 120:
         status = 'red'
@@ -51,97 +114,56 @@ def add_sensor_reading(reading: SensorReadingCreate, db: Session = Depends(get_d
     machine.status = status
     db.commit()
     db.refresh(db_reading)
-
-    return {
-        'reading': db_reading,
-        'predicted_status': status,
-        'machine_id': reading.machine_id
-    }
+    return {'reading': db_reading, 'predicted_status': status, 'machine_id': reading.machine_id}
 
 
-@router.get('/status/{machine_id}')
-def get_machine_prediction(machine_id: int, db: Session = Depends(get_db)):
-    machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    if not machine:
-        raise HTTPException(status_code=404, detail='Machine not found')
-
-    latest_reading = (
-        db.query(SensorReading)
-        .filter(SensorReading.machine_id == machine_id)
-        .order_by(SensorReading.recorded_at.desc())
-        .first()
-    )
-
-    return {
-        'machine_id': machine_id,
-        'machine_name': machine.name,
-        'current_status': machine.status,
-        'latest_reading': latest_reading
-    }
-
-
+# ── ML prediction with caller-supplied sensor values (no DB write) ───────────
 @router.post('/predict')
 def get_ml_prediction(reading: SensorReadingCreate, db: Session = Depends(get_db)):
     """
-    Accept sensor reading and return ML-based prediction.
-    Saves the reading to the database and returns predicted days until service.
+    Run ML prediction with caller-supplied sensor values.
+    Does NOT save the reading to the database.
     """
     machine = db.query(Machine).filter(Machine.id == reading.machine_id).first()
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
-    
-    # Save reading to database
-    db_reading = SensorReading(**reading.dict())
-    db.add(db_reading)
-    db.commit()
-    
-    # Get prediction from ML model
+
     result = predict_days_until_service(
         reading.temperature,
         reading.vibration,
         reading.pressure,
-        reading.runtime_hours
+        reading.runtime_hours,
     )
-    
-    # Update machine status based on prediction
-    if result['status'] == 'model_not_trained':
-        machine.status = 'unknown'
-    else:
+
+    if result['status'] != 'model_not_trained':
         machine.status = result['status']
-    db.commit()
-    
-    return {
-        'machine_id': reading.machine_id,
-        **result
-    }
+        db.commit()
+
+    return {'machine_id': reading.machine_id, **result}
 
 
+# ── Train the ML model ───────────────────────────────────────────────────────
 @router.post('/train')
 def trigger_training(db: Session = Depends(get_db)):
     """
-    Trigger model training using collected sensor readings.
-    Requires at least 20 readings in the database.
+    Train the RandomForest model on all stored sensor readings.
+    Requires at least 20 readings.
     """
     readings = db.query(SensorReading).all()
-    
+
     if len(readings) < 20:
         return {'error': 'Need at least 20 readings to train', 'current': len(readings)}
-    
-    # Prepare training data.
-    # Labels are derived from sensor health — always a positive value in [3, 90].
-    # High sensor stress → fewer days until service is needed.
+
     def _label(r) -> float:
+        """Derive a positive days_until_service label from sensor thresholds."""
         t, v, p = r.temperature, r.vibration, r.pressure
         if t > 90 or v > 8 or p > 120:
-            # Critical zone: 3–14 days
             penalty = max(t - 90, 0) * 0.5 + max(v - 8, 0) * 2 + max(p - 120, 0) * 0.1
             return float(max(3, 14 - int(penalty)))
         elif t > 75 or v > 5 or p > 100:
-            # Warning zone: 15–30 days
             penalty = max(t - 75, 0) * 0.8 + max(v - 5, 0) * 2 + max(p - 100, 0) * 0.1
             return float(max(15, 30 - int(penalty)))
         else:
-            # Healthy zone: 31–90 days
             stress = (t - 60) * 0.4 + v * 1.5 + (p - 70) * 0.2
             return float(min(90, max(31, int(90 - stress))))
 
@@ -155,5 +177,5 @@ def trigger_training(db: Session = Depends(get_db)):
         }
         for r in readings
     ]
-    
+
     return train_model(data)
