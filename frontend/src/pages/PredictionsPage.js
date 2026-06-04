@@ -159,22 +159,29 @@ export default function PredictionsPage() {
   }, [machines, predictions, running, loading]);
 
   /* ── Shared data source for chart AND table ─────────────────────────
-     One row per machine, always 10 rows.  Prediction fields are null
-     until results arrive (or are restored from localStorage).        */
-  const predRows = machines.map(m => {
-    const p = predictions[m.id];
-    return {
-      id:              m.id,
-      name:            m.name,
-      shortName:       m.name.length > 18 ? m.name.slice(0, 16) + '…' : m.name,
-      type:            m.machine_type,
-      currentStatus:   m.status,
-      days:            p?.days_until_service ?? null,
-      predictedStatus: p?.status             ?? null,
-      anomalyScore:    p?.anomaly_score       ?? null,
-      error:           p?.error               ?? null,
-    };
-  });
+     Sorted ascending by days (most critical / lowest days at top).
+     Unpredicted machines (null days) always sink to the bottom.      */
+  const predRows = machines
+    .map(m => {
+      const p = predictions[m.id];
+      return {
+        id:              m.id,
+        name:            m.name,
+        shortName:       m.name.length > 18 ? m.name.slice(0, 16) + '…' : m.name,
+        type:            m.machine_type,
+        currentStatus:   m.status,
+        days:            p?.days_until_service ?? null,
+        predictedStatus: p?.status             ?? null,
+        anomalyScore:    p?.anomaly_score       ?? null,
+        error:           p?.error               ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.days == null && b.days == null) return 0;
+      if (a.days == null) return 1;   // nulls sink to bottom
+      if (b.days == null) return -1;
+      return a.days - b.days;         // ascending: most critical (lowest) first
+    });
 
   const hasPredictions = Object.keys(predictions).length > 0;
   // Button is disabled only when ALL current machines already have successful predictions
@@ -322,7 +329,7 @@ export default function PredictionsPage() {
               <ReferenceLine x={7}  stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: '7d',  fill: '#ef4444', fontSize: 10, position: 'top' }} />
               <ReferenceLine x={30} stroke="#eab308" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: '30d', fill: '#eab308', fontSize: 10, position: 'top' }} />
               <Bar dataKey="days" radius={[0, 4, 4, 0]} maxBarSize={24}
-                label={{ position: 'right', formatter: v => v != null ? `${v}d` : '', fontSize: 11, fill: '#475569', fontWeight: 600 }}>
+                label={{ position: 'right', formatter: v => v != null ? `${Math.round(v)}d` : '', fontSize: 11, fill: '#475569', fontWeight: 600 }}>
                 {predRows.map(row => (
                   <Cell key={row.id} fill={barColor(row.days)} fillOpacity={row.days != null ? 1 : 0.18} />
                 ))}

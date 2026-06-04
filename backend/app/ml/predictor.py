@@ -69,7 +69,7 @@ def predict_days_until_service(temperature, vibration, pressure, runtime_hours):
         status = 'green'
     
     return {
-        'days_until_service': round(prediction, 2),
+        'days_until_service': int(round(prediction)),   # always a whole number
         'status': status,
         'anomaly_score': round(anomaly_score, 4)
     }
