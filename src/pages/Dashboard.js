@@ -255,10 +255,12 @@ function StatusDonut({ machines, loading }) {
 
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0, unknown: 0 };
-    machines.forEach(m => {
-      if (c[m.status] !== undefined) c[m.status]++;
-      else c.unknown++;
-    });
+    if (Array.isArray(machines)) {
+      machines.forEach(m => {
+        if (c[m.status] !== undefined) c[m.status]++;
+        else c.unknown++;
+      });
+    }
     return c;
   }, [machines]);
 
@@ -266,7 +268,7 @@ function StatusDonut({ machines, loading }) {
     .map(d => ({ ...d, value: counts[d.key] }))
     .filter(d => d.value > 0);
 
-  const total = machines.length;
+  const total = Array.isArray(machines) ? machines.length : 0;
 
   return (
     <ChartCard
@@ -527,8 +529,8 @@ export default function Dashboard() {
 
     Promise.all([getMachines(), getAllLogs()])
       .then(([machRes, logsRes]) => {
-        const mData = machRes.data  || [];
-        const lData = logsRes.data  || [];
+        const mData = Array.isArray(machRes.data) ? machRes.data : [];
+        const lData = Array.isArray(logsRes.data) ? logsRes.data : [];
 
         setMachines(mData);
         setLoading(false);
@@ -561,23 +563,29 @@ export default function Dashboard() {
   }, []);
 
   /* ── Derived KPI counts ── */
-  const counts = useMemo(() => ({
-    total:  machines.length,
-    green:  machines.filter(m => m.status === 'green').length,
-    yellow: machines.filter(m => m.status === 'yellow').length,
-    red:    machines.filter(m => m.status === 'red').length,
-  }), [machines]);
+  const counts = useMemo(() => {
+    const arr = Array.isArray(machines) ? machines : [];
+    return {
+      total:  arr.length,
+      green:  arr.filter(m => m.status === 'green').length,
+      yellow: arr.filter(m => m.status === 'yellow').length,
+      red:    arr.filter(m => m.status === 'red').length,
+    };
+  }, [machines]);
 
   /* ── Filtered machine list ── */
-  const filtered = useMemo(() => machines.filter(m => {
-    const matchStatus = filter === 'all' || m.status === filter;
-    const q = search.toLowerCase();
-    const matchSearch = !q
-      || m.name.toLowerCase().includes(q)
-      || m.machine_type.toLowerCase().includes(q)
-      || m.location.toLowerCase().includes(q);
-    return matchStatus && matchSearch;
-  }), [machines, filter, search]);
+  const filtered = useMemo(() => {
+    if (!Array.isArray(machines)) return [];
+    return machines.filter(m => {
+      const matchStatus = filter === 'all' || m.status === filter;
+      const q = search.toLowerCase();
+      const matchSearch = !q
+        || m.name.toLowerCase().includes(q)
+        || m.machine_type.toLowerCase().includes(q)
+        || m.location.toLowerCase().includes(q);
+      return matchStatus && matchSearch;
+    });
+  }, [machines, filter, search]);
 
   /* ══════════════════════════════════════════════════════════ */
   return (
