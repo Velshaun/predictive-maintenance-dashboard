@@ -13,13 +13,42 @@ export const api = axios.create({
 // ── Cache-busting interceptor ────────────────────────────────────────────
 // Append a timestamp query param (?_t=<ms>) to every GET request so the
 // browser cache and Vercel's edge CDN can never return a stale 304 response.
-// Without this, a previously-cached empty or error response would silently
-// cause all pages to show no data.
 api.interceptors.request.use(config => {
   if (!config.method || config.method.toLowerCase() === 'get') {
     config.params = { ...config.params, _t: Date.now() };
   }
   return config;
+});
+
+// ── Stale-while-revalidate response cache ────────────────────────────────
+// Successful GET responses that return an array are stored in sessionStorage
+// for up to CACHE_TTL_MS.  Pages hydrate from this cache on mount so they
+// render instantly on repeat visits while the background fetch completes.
+const CACHE_TTL_MS   = 5 * 60 * 1000; // 5 minutes
+const CACHE_PREFIX   = 'api_cache_';
+
+export function getCached(urlPath) {
+  try {
+    const raw = sessionStorage.getItem(CACHE_PREFIX + urlPath);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    return Date.now() - ts < CACHE_TTL_MS ? data : null;
+  } catch { return null; }
+}
+
+api.interceptors.response.use(response => {
+  if (
+    response.config.method?.toLowerCase() === 'get' &&
+    Array.isArray(response.data) &&
+    response.data.length > 0
+  ) {
+    // Strip the ?_t= cache-buster before using as the cache key
+    const key = CACHE_PREFIX + (response.config.url || '').replace(/\?.*$/, '');
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ data: response.data, ts: Date.now() }));
+    } catch { /* sessionStorage may be full or unavailable */ }
+  }
+  return response;
 });
 
 export const getMachines             = ()     => api.get('/api/machines/');

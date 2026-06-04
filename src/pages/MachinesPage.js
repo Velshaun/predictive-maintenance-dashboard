@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   getMachines, createMachine,
   softDeleteMachine, restoreMachine, permanentDeleteMachine, addLog,
+  getCached,
 } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
@@ -105,8 +106,8 @@ function calcCountdown(serviceDueDate, now) {
 
 /* ══════════════════════════════════════════════════════════ */
 export default function MachinesPage() {
-  const [machines, setMachines]       = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const [machines, setMachines]       = useState(() => getCached('/api/machines/') || []);
+  const [loading, setLoading]         = useState(!getCached('/api/machines/'));
   const [search, setSearch]           = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortDir, setSortDir]         = useState('desc');

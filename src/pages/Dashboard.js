@@ -10,7 +10,7 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import { getMachines, getAllLogs, getMachineReadings } from '../utils/api';
+import { getMachines, getAllLogs, getMachineReadings, getCached } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk, StatCardSkeleton, MachineCardSkeleton } from '../components/Skeleton';
 
@@ -516,8 +516,8 @@ const StatusDot = ({ status }) => {
    ═════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
   /* ── Machine grid state ── */
-  const [machines, setMachines] = useState([]);
-  const [loading,  setLoading]  = useState(true);
+  const [machines, setMachines] = useState(() => getCached('/api/machines/') || []);
+  const [loading,  setLoading]  = useState(!getCached('/api/machines/'));
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState('all');
 

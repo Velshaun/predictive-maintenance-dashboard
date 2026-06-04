@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts';
-import { getMachines, runPrediction, trainModel, addLog } from '../utils/api';
+import { getMachines, runPrediction, trainModel, addLog, getCached } from '../utils/api';
 import StatusBadge from '../components/StatusBadge';
 import { Sk } from '../components/Skeleton';
 
@@ -124,8 +124,8 @@ function ServiceWrenchBtn({ onClick }) {
 
 /* ══════════════════════════════════════════════════════════════════════ */
 export default function PredictionsPage() {
-  const [machines, setMachines]       = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const [machines, setMachines]       = useState(() => getCached('/api/machines/') || []);
+  const [loading, setLoading]         = useState(!getCached('/api/machines/'));
   const [predictions, setPredictions] = useState({});
   const [running, setRunning]         = useState(false);
   const [progress, setProgress]       = useState(0);
