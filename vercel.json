@@ -1,20 +1,7 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "build",
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
-        { "key": "Pragma",        "value": "no-cache" }
-      ]
-    }
-  ],
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "http://aa98d1adfbfea4c8ca56c8d6dddb606c-1269872415.us-east-2.elb.amazonaws.com/api/:path*"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
