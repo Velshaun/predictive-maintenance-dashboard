@@ -308,6 +308,7 @@ function StatusDonut({ machines, loading }) {
                       <Cell key={i} fill={entry.color} />
                     ))}
                   </Pie>
+                  <Tooltip content={<DonutTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
 
